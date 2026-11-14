@@ -10,14 +10,13 @@ on:
       - 'auth_info_baileys/**'
 
   schedule:
-    # تشغيل كل 6 ساعات؛ دورة السيرفر نفسها تستمر 330 دقيقة تقريبًا.
+    # تشغيل كل 6 ساعات؛ مدة السيرفر 330 دقيقة تقريبًا.
     - cron: '0 */6 * * *'
 
-# السماح للـ workflow بحفظ جلسة واتساب في المستودع.
 permissions:
   contents: write
 
-# يمنع تشغيل نسختين من سيرفر واتساب في نفس الوقت.
+# تشغيل نسخة واحدة فقط من هذا السيرفر في كل مرة.
 concurrency:
   group: sman-whatsapp-live-session
   cancel-in-progress: false
@@ -43,6 +42,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -148,40 +148,55 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
+          # حفظ نسخة الجلسة خارج مجلد التشغيل حتى لا نلمس ملفات Baileys المفتوحة.
+          SESSION_SNAPSHOT="$RUNNER_TEMP/whatsapp-session-snapshot"
+          SAVE_WORKTREE="$RUNNER_TEMP/whatsapp-session-save-worktree"
+          mkdir -p "$SESSION_SNAPSHOT"
+
           save_session() {
             if [[ ! -d "$SESSION_DIR" ]]; then
+              echo 'لا يوجد مجلد جلسة حتى الآن؛ سيتم تخطي الحفظ.'
               return 0
             fi
 
-            # -f يضمن إضافة ملفات الجلسة حتى لو كان مجلدها مذكورًا في .gitignore.
-            git add -f "$SESSION_DIR/"
+            find "$SESSION_SNAPSHOT" -mindepth 1 -delete
+            rsync -a --delete "$SESSION_DIR/" "$SESSION_SNAPSHOT/"
 
-            if git diff --cached --quiet; then
-              return 0
-            fi
+            for attempt in 1 2 3 4 5; do
+              echo "محاولة حفظ جلسة واتساب رقم $attempt..."
 
-            git commit -m 'chore: save WhatsApp session'
-
-            # إعادة المحاولة إذا تحرك فرع main بين fetch و push.
-            for attempt in 1 2 3; do
+              # نستخدم worktree منفصلًا؛ لا نعمل reset لمجلد السيرفر الحي.
               git fetch origin main
+              git worktree prune
+              rm -rf "$SAVE_WORKTREE"
+              git worktree add --detach "$SAVE_WORKTREE" origin/main
 
-              if ! git rebase origin/main; then
-                echo 'ERROR: تعارض أثناء تحديث جلسة واتساب. أوقفت الحفظ بدل استخدام force-push.'
-                git rebase --abort || true
-                return 1
-              fi
+              mkdir -p "$SAVE_WORKTREE/$SESSION_DIR"
+              rsync -a --delete "$SESSION_SNAPSHOT/" "$SAVE_WORKTREE/$SESSION_DIR/"
+              git -C "$SAVE_WORKTREE" add -A -f "$SESSION_DIR/"
 
-              if git push origin HEAD:main; then
-                echo 'تم حفظ جلسة واتساب على main بنجاح.'
+              if git -C "$SAVE_WORKTREE" diff --cached --quiet; then
+                echo 'جلسة واتساب لا تحتوي تغييرات جديدة.'
+                git worktree remove --force "$SAVE_WORKTREE"
                 return 0
               fi
 
-              echo "تعذّر push في المحاولة $attempt؛ ستتم إعادة المحاولة."
+              git -C "$SAVE_WORKTREE" config user.name 'github-actions[bot]'
+              git -C "$SAVE_WORKTREE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git -C "$SAVE_WORKTREE" commit -m 'chore: save WhatsApp session'
+
+              if git -C "$SAVE_WORKTREE" push origin HEAD:main; then
+                echo 'تم حفظ جلسة واتساب على main بنجاح.'
+                git worktree remove --force "$SAVE_WORKTREE"
+                return 0
+              fi
+
+              echo "فشل push في المحاولة $attempt؛ سيتم جلب آخر main وإعادة المحاولة."
+              git worktree remove --force "$SAVE_WORKTREE" || true
               sleep $((attempt * 3))
             done
 
-            echo 'ERROR: فشل push بعد 3 محاولات.'
+            echo 'ERROR: فشل حفظ جلسة واتساب بعد 5 محاولات.'
             return 1
           }
 
@@ -203,7 +218,6 @@ jobs:
               exit 1
             fi
 
-            # حفظ الجلسة فقط عند وجود تغييرات فعلية.
             save_session
 
             if (( minute % 30 == 0 )); then
