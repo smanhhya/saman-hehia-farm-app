@@ -1,4 +1,3 @@
-
 const express = require("express");
 const cors = require("cors");
 const pino = require("pino");
@@ -9,8 +8,6 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  Browsers,
   delay
 } = require("@whiskeysockets/baileys");
 
@@ -31,36 +28,14 @@ const logger = pino({ level: "silent" });
 
 let sock = null;
 let isConnected = false;
-let pairingTimer = null;
+let pairingCodeRequested = false;
 let isSendingQueueRunning = false;
 const sendQueue = [];
 
-// خزنة الرسائل لحل مشكلة "في انتظار هذه الرسالة" عند طلب إعادة التشفير
+// خزنة الرسائل لمنع تعليق الرسائل على "في انتظار هذه الرسالة"
 const messageStore = new Map();
 
-function cleanCorruptedSessionIfNeeded() {
-  const credsPath = path.join(SESSION_DIR, "creds.json");
-  if (fs.existsSync(credsPath)) {
-    try {
-      const creds = JSON.parse(fs.readFileSync(credsPath, "utf-8"));
-      if (!creds.registered) {
-        console.log("🧹 مسح جلسة قديمة غير مكتملة للبدء على نظافة...");
-        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-      }
-    } catch (e) {
-      fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-    }
-  }
-}
-
 async function connectToWhatsApp() {
-  if (pairingTimer) {
-    clearTimeout(pairingTimer);
-    pairingTimer = null;
-  }
-
-  cleanCorruptedSessionIfNeeded();
-
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
@@ -68,18 +43,14 @@ async function connectToWhatsApp() {
     version,
     logger,
     printQRInTerminal: false,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore ? makeCacheableSignalKeyStore(state.keys, logger) : state.keys
-    },
-    browser: Browsers.ubuntu("Chrome"),
+    auth: state,
+    browser: ["Ubuntu", "Chrome", "20.0.04"],
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
-    markOnlineOnConnect: true,
+    markOnlineOnConnect: false,
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
-    keepAliveIntervalMs: 20000,
-    // الدالة الحاسمة لمنع تعليق الرسائل على "في انتظار هذه الرسالة"
+    keepAliveIntervalMs: 25000,
     getMessage: async (key) => {
       if (key?.id && messageStore.has(key.id)) {
         return messageStore.get(key.id);
@@ -90,7 +61,6 @@ async function connectToWhatsApp() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // حفظ أي رسالة صادرة في الذاكرة لتلبية طلبات فك التشفير من هواتف العملاء
   sock.ev.on("messages.upsert", ({ messages }) => {
     for (const m of messages) {
       if (m.key?.id && m.message) {
@@ -103,20 +73,22 @@ async function connectToWhatsApp() {
     }
   });
 
-  // طلب كود الربط بطريقة آمنة إذا لم يكن مسجلاً
-  if (!sock.authState.creds.registered) {
-    pairingTimer = setTimeout(async () => {
+  // طلب كود الربط مرة واحدة فقط إذا لم يكن مسجلاً
+  if (!sock.authState.creds.registered && !pairingCodeRequested) {
+    pairingCodeRequested = true;
+    setTimeout(async () => {
       try {
         if (!sock || sock.authState.creds.registered) return;
         let code = await sock.requestPairingCode(PHONE_NUMBER);
         code = code?.match(/.{1,4}/g)?.join("-") || code;
         console.log("========================================");
-        console.log("🔑 كود ربط الواتساب الجديد الخاص بك هو: ", code);
+        console.log("🔑 كود ربط الواتساب الخاص بك هو: ", code);
         console.log("========================================");
       } catch (err) {
-        console.log("⚠️ إعادة محاولة استخراج كود الربط خلال ثوانٍ...", err.message);
+        pairingCodeRequested = false;
+        console.log("❌ خطأ في طلب كود الربط:", err.message);
       }
-    }, 6000);
+    }, 8000);
   }
 
   sock.ev.on("connection.update", async (update) => {
@@ -124,30 +96,27 @@ async function connectToWhatsApp() {
 
     if (connection === "close") {
       isConnected = false;
-      if (pairingTimer) {
-        clearTimeout(pairingTimer);
-        pairingTimer = null;
-      }
-
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log(`⚠️ الاتصال فصل (كود: ${statusCode})`);
 
-      // إذا كان الكود 401 (جلسة مرفوضة أو تم تسجيل الخروج)، نمسح المجلد التالف تلقائياً ونبدأ من جديد
-      if (statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 405) {
-        console.log("🧹 تم اكتشاف جلسة تالفة (401).. جاري مسحها تلقائياً وتوليد كود جديد...");
+      if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+        // مسح الجلسة فقط إذا كانت منتهية الصلاحية (401)
+        console.log("🧹 مسح الجلسة القديمة المنتهية (401) وتوليد كود جديد...");
         try {
           fs.rmSync(SESSION_DIR, { recursive: true, force: true });
         } catch (e) {}
-        setTimeout(() => connectToWhatsApp(), 3000);
+        pairingCodeRequested = false;
+        setTimeout(() => connectToWhatsApp(), 2000);
+      } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
+        // كود 515 يحدث لحظة إدخال الكود في الموبايل لإتمام الربط: إعادة اتصال فورية بدون مسح الملفات
+        console.log("🔄 جاري إتمام ربط الموبايل (Restart 515)...");
+        setTimeout(() => connectToWhatsApp(), 500);
       } else {
-        setTimeout(() => connectToWhatsApp(), 4000);
+        setTimeout(() => connectToWhatsApp(), 3000);
       }
     } else if (connection === "open") {
       isConnected = true;
-      if (pairingTimer) {
-        clearTimeout(pairingTimer);
-        pairingTimer = null;
-      }
+      pairingCodeRequested = true;
       console.log("========================================");
       console.log("✅ تم ربط الواتساب بنجاح والسيرفر جاهز للعمل 24/7!");
       console.log("========================================");
@@ -166,7 +135,6 @@ async function sendSafeWhatsAppMessage(rawPhone, textMessage) {
 
   let targetJid = cleanPhone + "@s.whatsapp.net";
 
-  // التحقق من الرقم وجلب الـ JID الرسمي ومفاتيح التشفير الخاصة بالعميل
   try {
     const [result] = await sock.onWhatsApp(cleanPhone);
     if (result && result.exists && result.jid) {
@@ -174,7 +142,6 @@ async function sendSafeWhatsAppMessage(rawPhone, textMessage) {
     }
   } catch (e) {}
 
-  // محاكاة الكتابة لمدة ثانية ونصف لتنشيط قناة التشفير ومنع الحظر
   try {
     await sock.presenceSubscribe(targetJid);
     await sock.sendPresenceUpdate("composing", targetJid);
@@ -189,7 +156,6 @@ async function sendSafeWhatsAppMessage(rawPhone, textMessage) {
   return cleanPhone;
 }
 
-// مشغل طابور الإرسال المتسلسل لمنع تداخل الرسائل
 async function processSendQueue() {
   if (isSendingQueueRunning) return;
   isSendingQueueRunning = true;
@@ -197,7 +163,6 @@ async function processSendQueue() {
   while (sendQueue.length > 0) {
     const item = sendQueue.shift();
     if (!isConnected) {
-      console.log("⏳ انتظار عودة اتصال الواتساب...");
       await delay(5000);
       sendQueue.unshift(item);
       continue;
@@ -205,7 +170,7 @@ async function processSendQueue() {
 
     try {
       const sentTo = await sendSafeWhatsAppMessage(item.phone, item.message);
-      console.log(`✅ تم الإرسال بنجاح إلى: ${sentTo} (متبقي في الطابور: ${sendQueue.length})`);
+      console.log(`✅ تم الإرسال بنجاح إلى: ${sentTo} (متبقي: ${sendQueue.length})`);
     } catch (err) {
       console.log(`❌ فشل الإرسال إلى ${item.phone}:`, err.message);
     }
