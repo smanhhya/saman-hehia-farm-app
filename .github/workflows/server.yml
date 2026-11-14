@@ -36,23 +36,22 @@ jobs:
           git config user.name "sman-bot"
           git config user.email "bot@sman.com"
 
-          # 1. تشغيل سيرفر الواتساب في الخلفية
           node index.js &
-          
-          # 2. تشغيل النفق لربط السيرفر بالـ CRM
+
           ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
-          
-          sleep 10
+          sleep 8
           echo "========================================="
           echo "🌐 رابط السيرفر المباشر للـ CRM هو:"
           grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1
           echo "========================================="
-          
-          # 3. حلقة ذكية لحفظ جلسة الواتساب بأمان كل 5 دقائق بدون تداخل
+
+          # إبقاء السيرفر حياً لمدة 5 ساعات ونصف مع حفظ آمن للجلسة دون إيقاف السيرفر
           for i in {1..65}; do
             sleep 300
             if [ -d "auth_info_baileys" ]; then
-              git add auth_info_baileys
-              git diff --staged --quiet || (git commit -m "Save WhatsApp session" && git pull --rebase autostash && git push)
+              git add auth_info_baileys || true
+              git commit -m "Save WhatsApp session" || true
+              git pull --rebase --autostash origin main || true
+              git push origin main || true
             fi
           done
