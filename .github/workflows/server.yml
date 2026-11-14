@@ -1,0 +1,54 @@
+name: Sman WhatsApp Live Server
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'auth_info_baileys/**'
+  schedule:
+    - cron: '0 */5 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  run-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies & Tunnel
+        run: |
+          npm install
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
+
+      - name: Start Server & Live Tunnel
+        run: |
+          git config user.name "sman-bot"
+          git config user.email "bot@sman.com"
+
+          node index.js &
+
+          ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          sleep 8
+          echo "========================================="
+          echo "🌐 رابط السيرفر المباشر للـ CRM هو:"
+          grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1
+          echo "========================================="
+
+          for i in {1..330}; do
+            sleep 60
+            if [ -d "auth_info_baileys" ]; then
+              git add auth_info_baileys
+              git diff --staged --quiet || (git commit -m "Save WhatsApp session" && git pull --rebase && git push)
+            fi
+          done
