@@ -1,4 +1,3 @@
-
 name: Sman WhatsApp Live Server
 
 on:
@@ -12,6 +11,11 @@ on:
 
 permissions:
   contents: write
+
+# حاسم جداً: إغلاق أي نسخة قديمة فوراً حتى لا تعمل نسختان معاً وتضرب التشفير
+concurrency:
+  group: sman-whatsapp-single-server
+  cancel-in-progress: true
 
 jobs:
   run-server:
@@ -28,7 +32,7 @@ jobs:
 
       - name: Install Dependencies & Tunnel
         run: |
-          npm install
+          npm install --no-audit --no-fund
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
           chmod +x cloudflared
 
@@ -37,22 +41,38 @@ jobs:
           git config user.name "sman-bot"
           git config user.email "bot@sman.com"
 
-          node index.js &
-
-          ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          # تشغيل النفق أولاً واستخراج الرابط
+          ./cloudflared tunnel --no-autoupdate --url http://localhost:8080 > tunnel.log 2>&1 &
           sleep 8
           echo "========================================="
           echo "🌐 رابط السيرفر المباشر للـ CRM هو:"
           grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1
           echo "========================================="
 
-          # إبقاء السيرفر حياً لمدة 5 ساعات ونصف مع حفظ آمن للجلسة دون إيقاف السيرفر
+          # تشغيل سيرفر الواتساب مع إعادة تشغيله تلقائياً لو توقف لأي سبب
+          (while true; do node index.js; sleep 3; done) &
+
+          # حفظ آمن للجلسة في مجلد منفصل فقط عندما تكون الجلسة مسجلة وسليمة
+          SAVE_WT="/tmp/sman_save_wt"
+          SNAPSHOT="/tmp/sman_session_snap"
+
           for i in {1..65}; do
             sleep 300
-            if [ -d "auth_info_baileys" ]; then
-              git add auth_info_baileys || true
-              git commit -m "Save WhatsApp session" || true
-              git pull --rebase --autostash origin main || true
-              git push origin main || true
+            if [ -f "auth_info_baileys/creds.json" ] && grep -q '"registered":true' "auth_info_baileys/creds.json"; then
+              rm -rf "$SNAPSHOT" && mkdir -p "$SNAPSHOT"
+              cp -r auth_info_baileys/. "$SNAPSHOT/"
+              git fetch origin main || true
+              git worktree prune || true
+              rm -rf "$SAVE_WT"
+              if git worktree add --detach "$SAVE_WT" origin/main; then
+                mkdir -p "$SAVE_WT/auth_info_baileys"
+                cp -r "$SNAPSHOT/." "$SAVE_WT/auth_info_baileys/"
+                git -C "$SAVE_WT" add -A auth_info_baileys || true
+                if ! git -C "$SAVE_WT" diff --cached --quiet; then
+                  git -C "$SAVE_WT" commit -m "chore: update valid session" || true
+                  git -C "$SAVE_WT" push origin HEAD:main || true
+                fi
+                git worktree remove --force "$SAVE_WT" || true
+              fi
             fi
           done
