@@ -1,4 +1,4 @@
-
+ثاتسنينيت،hdhehdhh
 name: Sman WhatsApp Live Server
 
 on:
@@ -32,7 +32,7 @@ jobs:
           node-version: '20'
 
       - name: Install Dependencies & Tunnel
-        run: |
+        run: |eyyehebdb
           npm install --no-audit --no-fund
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
           chmod +x cloudflared
