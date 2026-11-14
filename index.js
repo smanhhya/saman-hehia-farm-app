@@ -39,7 +39,7 @@ async function connectToWhatsApp() {
       } catch (err) {
         console.log("❌ خطأ في طلب كود الربط:", err);
       }
-    }, 4000);
+    }, 15000);
   }
 
   sock.ev.on("creds.update", saveCreds);
