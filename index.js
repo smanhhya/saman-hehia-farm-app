@@ -31,8 +31,10 @@ const logger = pino({ level: "silent" });
 let sock = null;
 let isConnected = false;
 let isConnecting = false;
+let isInitialStartup = true;
 let currentPairingCode = null;
 let pairingRetryTimer = null;
+let reconnectTimer = null;
 let isSendingQueueRunning = false;
 const sendQueue = [];
 
@@ -43,12 +45,25 @@ function cleanCorruptedSessionIfNeeded() {
   const credsPath = path.join(SESSION_DIR, "creds.json");
   if (fs.existsSync(credsPath)) {
     try {
-      JSON.parse(fs.readFileSync(credsPath, "utf-8"));
+      const creds = JSON.parse(fs.readFileSync(credsPath, "utf-8"));
+      // عند بدء تشغيل السيرفر لأول مرة فقط، إذا كانت هناك جلسة قديمة غير مكتملة نمسحها لنبدأ بمفاتيح جديدة
+      if (isInitialStartup && !creds.registered) {
+        console.log("🧹 مسح بقايا محاولة ربط قديمة غير مكتملة للبدء بمفاتيح جديدة...");
+        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+      }
     } catch (e) {
       console.log("🧹 مسح ملف جلسة تالف للبدء على نظافة...");
       fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     }
   }
+}
+
+function scheduleReconnect(delayMs) {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToWhatsApp();
+  }, delayMs);
 }
 
 async function requestPairingCodeSafely(targetSock) {
@@ -66,6 +81,7 @@ async function requestPairingCodeSafely(targetSock) {
     currentPairingCode = code;
     console.log("========================================");
     console.log("🔑 كود ربط الواتساب الجديد الخاص بك هو: ", code);
+    console.log("📱 أدخل هذا الكود الآن في واتساب (رقم 01280531968) خلال دقيقة واحدة");
     console.log("========================================");
   } catch (err) {
     console.log("⚠️ جاري إعادة محاولة استخراج كود الربط خلال 5 ثوانٍ...", err.message);
@@ -94,6 +110,7 @@ async function connectToWhatsApp() {
 
   try {
     cleanCorruptedSessionIfNeeded();
+    isInitialStartup = false;
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
@@ -115,13 +132,13 @@ async function connectToWhatsApp() {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore ? makeCacheableSignalKeyStore(state.keys, logger) : state.keys
       },
-      browser: Browsers.ubuntu("Chrome"),
+      browser: Browsers.macOS("Chrome"),
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
       markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 20000,
+      keepAliveIntervalMs: 25000,
       // الدالة الحاسمة لمنع تعليق الرسائل على "في انتظار هذه الرسالة"
       getMessage: async (key) => {
         if (key?.id && messageStore.has(key.id)) {
@@ -153,12 +170,12 @@ async function connectToWhatsApp() {
       if (currentSock !== sock) return;
       const { connection, lastDisconnect, qr } = update;
 
-      // طلب كود الربط فور جاهزية قناة الاتصال مع خوادم واتساب
-      if ((qr || connection === "connecting") && !currentSock.authState.creds.registered && !pairingStartedForThisSocket) {
+      // نطلب كود الربط فقط بعد وصول إشارة qr التي تؤكد اكتمال تشفير القناة مع خوادم واتساب
+      if (qr && !currentSock.authState.creds.registered && !pairingStartedForThisSocket) {
         pairingStartedForThisSocket = true;
         pairingRetryTimer = setTimeout(() => {
           requestPairingCodeSafely(currentSock);
-        }, 2500);
+        }, 1500);
       }
 
       if (connection === "close") {
@@ -179,9 +196,9 @@ async function connectToWhatsApp() {
           try {
             fs.rmSync(SESSION_DIR, { recursive: true, force: true });
           } catch (e) {}
-          setTimeout(() => connectToWhatsApp(), 3000);
+          scheduleReconnect(3000);
         } else {
-          setTimeout(() => connectToWhatsApp(), 3000);
+          scheduleReconnect(2000);
         }
       } else if (connection === "open") {
         isConnected = true;
@@ -199,7 +216,7 @@ async function connectToWhatsApp() {
   } catch (err) {
     isConnecting = false;
     console.log("⚠️ خطأ أثناء تهيئة الاتصال، إعادة المحاولة خلال 4 ثوانٍ...", err.message);
-    setTimeout(() => connectToWhatsApp(), 4000);
+    scheduleReconnect(4000);
   }
 }
 
