@@ -1,84 +1,152 @@
 const express = require("express");
 const cors = require("cors");
 const pino = require("pino");
+const fs = require("fs");
+const path = require("path");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   Browsers,
   delay
 } = require("@whiskeysockets/baileys");
 
-// درع حماية لمنع توقف السيرفر بسبب أي خطأ تشفير في الخلفية (مثل Bad MAC)
 process.on("uncaughtException", (err) => {
-  console.log("⚠️ تم تجاهل خطأ غير مؤثر في الخلفية:", err.message);
+  console.log("⚠️ تجاهل خطأ خلفي:", err.message);
 });
 process.on("unhandledRejection", (err) => {
-  console.log("⚠️ تم تجاهل وعد غير معالج:", err?.message || err);
+  console.log("⚠️ تجاهل وعد غير معالج:", err?.message || err);
 });
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-let sock;
-let isConnected = false;
-let pairingCodeRequested = false;
-
+const SESSION_DIR = path.join(__dirname, "auth_info_baileys");
 const PHONE_NUMBER = "201280531968";
+const logger = pino({ level: "silent" });
+
+let sock = null;
+let isConnected = false;
+let pairingTimer = null;
+let isSendingQueueRunning = false;
+const sendQueue = [];
+
+// خزنة الرسائل لحل مشكلة "في انتظار هذه الرسالة" عند طلب إعادة التشفير
+const messageStore = new Map();
+
+function cleanCorruptedSessionIfNeeded() {
+  const credsPath = path.join(SESSION_DIR, "creds.json");
+  if (fs.existsSync(credsPath)) {
+    try {
+      const creds = JSON.parse(fs.readFileSync(credsPath, "utf-8"));
+      if (!creds.registered) {
+        console.log("🧹 مسح جلسة قديمة غير مكتملة للبدء على نظافة...");
+        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+      }
+    } catch (e) {
+      fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    }
+  }
+}
 
 async function connectToWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
+  if (pairingTimer) {
+    clearTimeout(pairingTimer);
+    pairingTimer = null;
+  }
+
+  cleanCorruptedSessionIfNeeded();
+
+  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
     version,
-    logger: pino({ level: "silent" }),
+    logger,
     printQRInTerminal: false,
-    auth: state,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore ? makeCacheableSignalKeyStore(state.keys, logger) : state.keys
+    },
     browser: Browsers.ubuntu("Chrome"),
-    syncFullHistory: false, // منع مزامنة الرسائل القديمة لمنع خطأ Bad MAC
+    syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
-    markOnlineOnConnect: false,
+    markOnlineOnConnect: true,
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
-    keepAliveIntervalMs: 25000
+    keepAliveIntervalMs: 20000,
+    // الدالة الحاسمة لمنع تعليق الرسائل على "في انتظار هذه الرسالة"
+    getMessage: async (key) => {
+      if (key?.id && messageStore.has(key.id)) {
+        return messageStore.get(key.id);
+      }
+      return { conversation: "سمان ههيا" };
+    }
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    // طلب كود الربط فور جاهزية خط الاتصال (لمرة واحدة فقط)
-    if ((connection === "connecting" || qr) && !sock.authState.creds.registered && !pairingCodeRequested) {
-      pairingCodeRequested = true;
-      setTimeout(async () => {
-        try {
-          let code = await sock.requestPairingCode(PHONE_NUMBER);
-          code = code?.match(/.{1,4}/g)?.join("-") || code;
-          console.log("========================================");
-          console.log("🔑 كود ربط الواتساب الخاص بك هو: ", code);
-          console.log("========================================");
-        } catch (err) {
-          pairingCodeRequested = false;
-          console.log("❌ خطأ في طلب كود الربط:", err.message);
+  // حفظ أي رسالة صادرة في الذاكرة لتلبية طلبات فك التشفير من هواتف العملاء
+  sock.ev.on("messages.upsert", ({ messages }) => {
+    for (const m of messages) {
+      if (m.key?.id && m.message) {
+        messageStore.set(m.key.id, m.message);
+        if (messageStore.size > 500) {
+          const firstKey = messageStore.keys().next().value;
+          messageStore.delete(firstKey);
         }
-      }, 5000);
+      }
     }
+  });
+
+  // طلب كود الربط بطريقة آمنة إذا لم يكن مسجلاً
+  if (!sock.authState.creds.registered) {
+    pairingTimer = setTimeout(async () => {
+      try {
+        if (!sock || sock.authState.creds.registered) return;
+        let code = await sock.requestPairingCode(PHONE_NUMBER);
+        code = code?.match(/.{1,4}/g)?.join("-") || code;
+        console.log("========================================");
+        console.log("🔑 كود ربط الواتساب الجديد الخاص بك هو: ", code);
+        console.log("========================================");
+      } catch (err) {
+        console.log("⚠️ إعادة محاولة استخراج كود الربط خلال ثوانٍ...", err.message);
+      }
+    }, 6000);
+  }
+
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
       isConnected = false;
+      if (pairingTimer) {
+        clearTimeout(pairingTimer);
+        pairingTimer = null;
+      }
+
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`⚠️ الاتصال فصل (كود: ${statusCode})، جاري إعادة الاتصال...`, shouldReconnect);
-      if (shouldReconnect) {
+      console.log(`⚠️ الاتصال فصل (كود: ${statusCode})`);
+
+      // إذا كان الكود 401 (جلسة مرفوضة أو تم تسجيل الخروج)، نمسح المجلد التالف تلقائياً ونبدأ من جديد
+      if (statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 405) {
+        console.log("🧹 تم اكتشاف جلسة تالفة (401).. جاري مسحها تلقائياً وتوليد كود جديد...");
+        try {
+          fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+        } catch (e) {}
+        setTimeout(() => connectToWhatsApp(), 3000);
+      } else {
         setTimeout(() => connectToWhatsApp(), 4000);
       }
     } else if (connection === "open") {
       isConnected = true;
-      pairingCodeRequested = true;
+      if (pairingTimer) {
+        clearTimeout(pairingTimer);
+        pairingTimer = null;
+      }
       console.log("========================================");
       console.log("✅ تم ربط الواتساب بنجاح والسيرفر جاهز للعمل 24/7!");
       console.log("========================================");
@@ -88,59 +156,98 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
-// مسار فحص حالة السيرفر من لوحة التحكم
+// دالة إرسال موحدة تفحص الرقم وتنشط التشفير قبل الإرسال
+async function sendSafeWhatsAppMessage(rawPhone, textMessage) {
+  let cleanPhone = rawPhone.toString().replace(/\D/g, "");
+  if (cleanPhone.startsWith("0020")) cleanPhone = cleanPhone.substring(2);
+  else if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
+  else if (cleanPhone.length === 10 && cleanPhone.startsWith("1")) cleanPhone = "20" + cleanPhone;
+
+  let targetJid = cleanPhone + "@s.whatsapp.net";
+
+  // التحقق من الرقم وجلب الـ JID الرسمي ومفاتيح التشفير الخاصة بالعميل
+  try {
+    const [result] = await sock.onWhatsApp(cleanPhone);
+    if (result && result.exists && result.jid) {
+      targetJid = result.jid;
+    }
+  } catch (e) {}
+
+  // محاكاة الكتابة لمدة ثانية ونصف لتنشيط قناة التشفير ومنع الحظر
+  try {
+    await sock.presenceSubscribe(targetJid);
+    await sock.sendPresenceUpdate("composing", targetJid);
+    await delay(1500);
+    await sock.sendPresenceUpdate("paused", targetJid);
+  } catch (e) {}
+
+  const sentMsg = await sock.sendMessage(targetJid, { text: textMessage });
+  if (sentMsg?.key?.id && sentMsg.message) {
+    messageStore.set(sentMsg.key.id, sentMsg.message);
+  }
+  return cleanPhone;
+}
+
+// مشغل طابور الإرسال المتسلسل لمنع تداخل الرسائل
+async function processSendQueue() {
+  if (isSendingQueueRunning) return;
+  isSendingQueueRunning = true;
+
+  while (sendQueue.length > 0) {
+    const item = sendQueue.shift();
+    if (!isConnected) {
+      console.log("⏳ انتظار عودة اتصال الواتساب...");
+      await delay(5000);
+      sendQueue.unshift(item);
+      continue;
+    }
+
+    try {
+      const sentTo = await sendSafeWhatsAppMessage(item.phone, item.message);
+      console.log(`✅ تم الإرسال بنجاح إلى: ${sentTo} (متبقي في الطابور: ${sendQueue.length})`);
+    } catch (err) {
+      console.log(`❌ فشل الإرسال إلى ${item.phone}:`, err.message);
+    }
+
+    if (sendQueue.length > 0) {
+      const waitMs = Math.floor(Math.random() * (8000 - 5000 + 1)) + 5000;
+      await delay(waitMs);
+    }
+  }
+
+  isSendingQueueRunning = false;
+  console.log("🎉 اكتمل إرسال جميع الرسائل في الطابور!");
+}
+
 app.get("/", (req, res) => {
-  res.status(200).send(
-    isConnected
-      ? "Server is running & WhatsApp Connected!"
-      : "Server is running (Waiting for WhatsApp)..."
-  );
+  res.status(200).json({
+    ok: true,
+    connected: isConnected,
+    queueLength: sendQueue.length,
+    message: isConnected ? "Server is running & WhatsApp Connected!" : "Waiting for WhatsApp pairing..."
+  });
 });
 
-// مسار الإرسال المخصص الذكي (لمنصة whatsapp.html والـ CRM)
-app.post("/send-bulk-smart", async (req, res) => {
+app.post("/send-bulk-smart", (req, res) => {
   const { bulkData } = req.body;
-
   if (!bulkData || !Array.isArray(bulkData)) {
     return res.status(400).json({ error: "البيانات ناقصة!" });
   }
-
   if (!isConnected) {
     return res.status(503).json({ error: "الواتساب غير متصل بالسيرفر حالياً!" });
   }
 
-  res.status(200).json({ status: "started", count: bulkData.length });
-  console.log(`📥 استلام طلب إرسال مخصص لـ ${bulkData.length} عميل...`);
-
-  for (let i = 0; i < bulkData.length; i++) {
-    let { phone, message } = bulkData[i];
-    if (!phone || !message) continue;
-
-    let cleanPhone = phone.toString().replace(/\D/g, "");
-    if (cleanPhone.startsWith("0020")) cleanPhone = cleanPhone.substring(2);
-    else if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
-    else if (cleanPhone.length === 10 && cleanPhone.startsWith("1")) cleanPhone = "20" + cleanPhone;
-
-    let jid = cleanPhone + "@s.whatsapp.net";
-
-    try {
-      await sock.sendMessage(jid, { text: message });
-      console.log(`✅ [${i + 1}/${bulkData.length}] تم الإرسال إلى: ${cleanPhone}`);
-    } catch (error) {
-      console.log(`❌ [${i + 1}/${bulkData.length}] فشل الإرسال إلى: ${cleanPhone}`, error.message);
+  bulkData.forEach((item) => {
+    if (item.phone && item.message) {
+      sendQueue.push({ phone: item.phone, message: item.message });
     }
+  });
 
-    // فاصل زمني آمن بين كل رسالة وأخرى (من 6 إلى 10 ثوانٍ)
-    if (i < bulkData.length - 1) {
-      let randomDelay = Math.floor(Math.random() * (10000 - 6000 + 1)) + 6000;
-      await delay(randomDelay);
-    }
-  }
-  console.log("🎉 تم الانتهاء من إرسال الدفعة بالكامل!");
+  res.status(200).json({ status: "queued", added: bulkData.length, totalInQueue: sendQueue.length });
+  processSendQueue();
 });
 
-// مسار إضافي لدعم الكود القديم (/send-bulk) احتياطياً
-app.post("/send-bulk", async (req, res) => {
+app.post("/send-bulk", (req, res) => {
   const { numbers, message } = req.body;
   if (!numbers || !Array.isArray(numbers) || !message) {
     return res.status(400).send("البيانات ناقصة!");
@@ -148,20 +255,10 @@ app.post("/send-bulk", async (req, res) => {
   if (!isConnected) {
     return res.status(503).send("الواتساب غير متصل!");
   }
-  res.status(200).send("جاري الإرسال...");
 
-  for (let i = 0; i < numbers.length; i++) {
-    let cleanPhone = numbers[i].toString().replace(/\D/g, "");
-    if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
-    let jid = cleanPhone + "@s.whatsapp.net";
-    try {
-      await sock.sendMessage(jid, { text: message });
-      console.log(`✅ تم الإرسال إلى: ${cleanPhone}`);
-    } catch (e) {
-      console.log(`❌ فشل الإرسال إلى: ${cleanPhone}`);
-    }
-    if (i < numbers.length - 1) await delay(7000);
-  }
+  numbers.forEach((num) => sendQueue.push({ phone: num, message }));
+  res.status(200).send("تمت الإضافة لطابور الإرسال");
+  processSendQueue();
 });
 
 const PORT = process.env.PORT || 8080;
