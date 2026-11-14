@@ -2,239 +2,57 @@ name: Sman WhatsApp Live Server
 
 on:
   workflow_dispatch:
-
   push:
-    branches:
-      - main
+    branches: [ main ]
     paths-ignore:
       - 'auth_info_baileys/**'
-
   schedule:
-    # تشغيل كل 6 ساعات؛ مدة السيرفر 330 دقيقة تقريبًا.
-    - cron: '0 */6 * * *'
+    - cron: '0 */5 * * *'
 
 permissions:
   contents: write
 
-# تشغيل نسخة واحدة فقط من هذا السيرفر في كل مرة.
-concurrency:
-  group: sman-whatsapp-live-session
-  cancel-in-progress: false
-
 jobs:
   run-server:
-    name: Start Server & Live Tunnel
     runs-on: ubuntu-latest
     timeout-minutes: 350
-
-    env:
-      PORT: '8080'
-      SESSION_DIR: auth_info_baileys
-      RUN_MINUTES: '330'
-      SERVER_LOG: ${{ runner.temp }}/sman-whatsapp-server.log
-      TUNNEL_LOG: ${{ runner.temp }}/sman-whatsapp-tunnel.log
-      SERVER_PID_FILE: ${{ runner.temp }}/sman-whatsapp-server.pid
-      TUNNEL_PID_FILE: ${{ runner.temp }}/sman-whatsapp-tunnel.pid
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: true
+          node-version: '20'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          package-manager-cache: false
-
-      - name: Install Node dependencies
-        shell: bash
+      - name: Install Dependencies & Tunnel
         run: |
-          set -Eeuo pipefail
-          if [[ -f package-lock.json ]]; then
-            npm ci --no-audit --no-fund
-          else
-            npm install --no-audit --no-fund
-          fi
+          npm install
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
 
-      - name: Install Cloudflared
-        shell: bash
+      - name: Start Server & Live Tunnel
         run: |
-          set -Eeuo pipefail
-          curl -fsSL --retry 3 --retry-delay 2 \
-            -o "$RUNNER_TEMP/cloudflared" \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          sudo install -m 0755 "$RUNNER_TEMP/cloudflared" /usr/local/bin/cloudflared
-          cloudflared --version
+          git config user.name "sman-bot"
+          git config user.email "bot@sman.com"
 
-      - name: Start WhatsApp server and Cloudflare tunnel
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          if [[ ! -f index.js ]]; then
-            echo 'ERROR: لم يتم العثور على index.js في جذر المستودع.'
-            exit 1
-          fi
-
-          nohup env PORT="$PORT" node index.js > "$SERVER_LOG" 2>&1 < /dev/null &
-          SERVER_PID=$!
-          echo "$SERVER_PID" > "$SERVER_PID_FILE"
-
-          SERVER_READY=0
-          for attempt in {1..30}; do
-            if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null; then
-              SERVER_READY=1
-              break
-            fi
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo 'ERROR: تطبيق Node توقف أثناء بدء التشغيل.'
-              tail -n 100 "$SERVER_LOG" || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          if [[ "$SERVER_READY" != '1' ]]; then
-            echo 'ERROR: السيرفر لم يستجب على المنفذ 8080 خلال 60 ثانية.'
-            tail -n 100 "$SERVER_LOG" || true
-            exit 1
-          fi
-
-          nohup cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${PORT}" \
-            > "$TUNNEL_LOG" 2>&1 < /dev/null &
-          TUNNEL_PID=$!
-          echo "$TUNNEL_PID" > "$TUNNEL_PID_FILE"
-
-          TUNNEL_URL=''
-          for attempt in {1..60}; do
-            TUNNEL_URL="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$TUNNEL_LOG" | tail -n 1 || true)"
-            if [[ -n "$TUNNEL_URL" ]]; then
-              break
-            fi
-            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              echo 'ERROR: عملية Cloudflare Tunnel توقفت.'
-              cat "$TUNNEL_LOG" || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          if [[ -z "$TUNNEL_URL" ]]; then
-            echo 'ERROR: لم يتم استخراج رابط trycloudflare خلال 120 ثانية.'
-            cat "$TUNNEL_LOG" || true
-            exit 1
-          fi
-
-          {
-            echo '## WhatsApp test server'
-            echo "رابط السيرفر التجريبي: $TUNNEL_URL"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          echo '============================================'
-          echo "رابط السيرفر التجريبي: $TUNNEL_URL"
-          echo '============================================'
-          echo 'سجل بدء السيرفر (قد يحتوي كود ربط واتساب):'
-          tail -n 60 "$SERVER_LOG" || true
-
-      - name: Keep server alive and safely save WhatsApp session
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-          # حفظ نسخة الجلسة خارج مجلد التشغيل حتى لا نلمس ملفات Baileys المفتوحة.
-          SESSION_SNAPSHOT="$RUNNER_TEMP/whatsapp-session-snapshot"
-          SAVE_WORKTREE="$RUNNER_TEMP/whatsapp-session-save-worktree"
-          mkdir -p "$SESSION_SNAPSHOT"
-
-          save_session() {
-            if [[ ! -d "$SESSION_DIR" ]]; then
-              echo 'لا يوجد مجلد جلسة حتى الآن؛ سيتم تخطي الحفظ.'
-              return 0
-            fi
-
-            find "$SESSION_SNAPSHOT" -mindepth 1 -delete
-            rsync -a --delete "$SESSION_DIR/" "$SESSION_SNAPSHOT/"
-
-            for attempt in 1 2 3 4 5; do
-              echo "محاولة حفظ جلسة واتساب رقم $attempt..."
-
-              # نستخدم worktree منفصلًا؛ لا نعمل reset لمجلد السيرفر الحي.
-              git fetch origin main
-              git worktree prune
-              rm -rf "$SAVE_WORKTREE"
-              git worktree add --detach "$SAVE_WORKTREE" origin/main
-
-              mkdir -p "$SAVE_WORKTREE/$SESSION_DIR"
-              rsync -a --delete "$SESSION_SNAPSHOT/" "$SAVE_WORKTREE/$SESSION_DIR/"
-              git -C "$SAVE_WORKTREE" add -A -f "$SESSION_DIR/"
-
-              if git -C "$SAVE_WORKTREE" diff --cached --quiet; then
-                echo 'جلسة واتساب لا تحتوي تغييرات جديدة.'
-                git worktree remove --force "$SAVE_WORKTREE"
-                return 0
-              fi
-
-              git -C "$SAVE_WORKTREE" config user.name 'github-actions[bot]'
-              git -C "$SAVE_WORKTREE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git -C "$SAVE_WORKTREE" commit -m 'chore: save WhatsApp session'
-
-              if git -C "$SAVE_WORKTREE" push origin HEAD:main; then
-                echo 'تم حفظ جلسة واتساب على main بنجاح.'
-                git worktree remove --force "$SAVE_WORKTREE"
-                return 0
-              fi
-
-              echo "فشل push في المحاولة $attempt؛ سيتم جلب آخر main وإعادة المحاولة."
-              git worktree remove --force "$SAVE_WORKTREE" || true
-              sleep $((attempt * 3))
-            done
-
-            echo 'ERROR: فشل حفظ جلسة واتساب بعد 5 محاولات.'
-            return 1
-          }
-
-          SERVER_PID="$(cat "$SERVER_PID_FILE")"
-          TUNNEL_PID="$(cat "$TUNNEL_PID_FILE")"
-
-          for ((minute=1; minute<=RUN_MINUTES; minute++)); do
-            sleep 60
-
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo 'ERROR: سيرفر Node توقف أثناء التشغيل.'
-              tail -n 100 "$SERVER_LOG" || true
-              exit 1
-            fi
-
-            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              echo 'ERROR: Cloudflare Tunnel توقف أثناء التشغيل.'
-              tail -n 100 "$TUNNEL_LOG" || true
-              exit 1
-            fi
-
-            save_session
-
-            if (( minute % 30 == 0 )); then
-              echo "السيرفر ما زال يعمل؛ مرّ $minute دقيقة من أصل $RUN_MINUTES."
+          # 1. تشغيل سيرفر الواتساب في الخلفية
+          node index.js &
+          
+          # 2. تشغيل النفق لربط السيرفر بالـ CRM
+          ./cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          
+          sleep 10
+          echo "========================================="
+          echo "🌐 رابط السيرفر المباشر للـ CRM هو:"
+          grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' tunnel.log | head -n 1
+          echo "========================================="
+          
+          # 3. حلقة ذكية لحفظ جلسة الواتساب بأمان كل 5 دقائق بدون تداخل
+          for i in {1..65}; do
+            sleep 300
+            if [ -d "auth_info_baileys" ]; then
+              git add auth_info_baileys
+              git diff --staged --quiet || (git commit -m "Save WhatsApp session" && git pull --rebase autostash && git push)
             fi
           done
-
-          # حفظ أخير قبل انتهاء التشغيل.
-          save_session
-
-      - name: Stop background processes
-        if: always()
-        shell: bash
-        run: |
-          if [[ -f "$SERVER_PID_FILE" ]]; then
-            kill "$(cat "$SERVER_PID_FILE")" 2>/dev/null || true
-          fi
-          if [[ -f "$TUNNEL_PID_FILE" ]]; then
-            kill "$(cat "$TUNNEL_PID_FILE")" 2>/dev/null || true
-          fi
