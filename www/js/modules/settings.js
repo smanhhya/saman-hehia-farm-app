@@ -67,7 +67,6 @@ export function hydrateSettingsUI() {
     setVal('setCrmSafetyMargin', s.crmSafetyMarginPct ?? 8);
     setVal('setCrmExtraDays', s.crmExtraBufferDays ?? 5);
 
-    // تحديث اسم المزرعة في الشريط الجانبي والعنوان
     const brandName = s.farmName || DEFAULT_SETTINGS.farmName;
     document.querySelectorAll('.farm-brand-text').forEach((el) => {
         el.textContent = brandName;
@@ -163,8 +162,7 @@ export async function handleImportBackup(event) {
             return showToast('ملف النسخة الاحتياطية غير صالح!', true);
         }
 
-        const ok = confirm('⚠️ تنبيه: استعادة النسخة الاحتياطية ستستبدل البيانات الحالية في قاعدة البيانات.
-هل أنت متأكد من المتابعة؟');
+        const ok = confirm('⚠️ تنبيه: استعادة النسخة الاحتياطية ستستبدل البيانات الحالية في قاعدة البيانات.\nهل أنت متأكد من المتابعة؟');
         if (!ok) return;
         if (prompt('اكتب "استعادة" للتأكيد النهائي:') !== 'استعادة') return;
 
@@ -179,8 +177,7 @@ export async function handleImportBackup(event) {
 }
 
 export async function resetSystem() {
-    if (!confirm('🛑 تحذير شديد: سيتم مسح جميع الدفعات والمخازن والخزنة للأبد!
-ننصح بشدة بتحميل نسخة احتياطية أولاً.')) return;
+    if (!confirm('🛑 تحذير شديد: سيتم مسح جميع الدفعات والمخازن والخزنة للأبد!\nننصح بشدة بتحميل نسخة احتياطية أولاً.')) return;
     if (prompt('اكتب "تأكيد" للمسح الكامل:') !== 'تأكيد') return;
 
     await withActionLock('factoryReset', async () => {
