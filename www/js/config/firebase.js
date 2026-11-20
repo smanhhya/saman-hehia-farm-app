@@ -58,7 +58,7 @@ export async function atomicAdjust(path, delta, options = {}) {
         const current = parseFloat(currentValue) || 0;
         const next = current + numDelta;
         if (!allowNegative && next < -0.0001) {
-            return; // Abort transaction safely
+            return;
         }
         const safeNext = !allowNegative && next < 0 ? 0 : next;
         return Number(safeNext.toFixed(decimals));
@@ -71,36 +71,61 @@ export async function atomicAdjust(path, delta, options = {}) {
 }
 
 /**
- * ترحيل أو تحديث دفعة في الـ CRM بأمان تام دون المساس بحجوزات العملاء (booked)
+ * ترحيل أو تحديث دفعة في الـ CRM بأمان تام لجميع المراحل (عمر يوم / تفريخ -> تربية -> ذبح)
+ * - يحافظ دائماً على initialEggs و hatchedChicks و hatchRate
+ * - عند الإنشاء لأول مرة فقط يُهيئ stock و booked ككائنات فارغة
+ * - عند التحديث (مثل الانتقال للتربية أو تسجيل نافق) لا يلمس حجوزات العملاء (booked) نهائياً
  */
 export async function syncBatchToCRM(batchId, data, isNew = false) {
     const batchDocRef = doc(crmDb, "inventory", "batches");
-    if (isNew) {
+
+    let shouldInitializeNew = isNew;
+    if (!shouldInitializeNew) {
+        try {
+            const snap = await getDoc(batchDocRef);
+            if (!snap.exists() || !snap.data()?.[batchId]) {
+                shouldInitializeNew = true;
+            }
+        } catch (err) {
+            // نكمل بالدمج الآمن
+        }
+    }
+
+    const payload = {};
+    if (data.name !== undefined) payload.name = data.name;
+    if (data.stage !== undefined) payload.stage = data.stage;
+    if (data.birdType !== undefined) payload.birdType = data.birdType;
+    if (data.initialEggs !== undefined) payload.initialEggs = Math.max(0, Math.floor(Number(data.initialEggs) || 0));
+    if (data.hatchedChicks !== undefined) payload.hatchedChicks = Math.max(0, Math.floor(Number(data.hatchedChicks) || 0));
+    if (data.hatchRate !== undefined) payload.hatchRate = Number(data.hatchRate) || 0;
+    if (data.expectedChicks !== undefined) payload.expectedChicks = Math.max(0, Math.floor(Number(data.expectedChicks) || 0));
+    if (data.aliveBirds !== undefined) payload.aliveBirds = Math.max(0, Math.floor(Number(data.aliveBirds) || 0));
+    if (data.unfertilized !== undefined) payload.unfertilized = Math.max(0, Math.floor(Number(data.unfertilized) || 0));
+    if (data.deadInShell !== undefined) payload.deadInShell = Math.max(0, Math.floor(Number(data.deadInShell) || 0));
+    if (data.expectedPairs !== undefined) payload.expectedPairs = Math.max(0, Math.floor(Number(data.expectedPairs) || 0));
+    if (data.insertDate !== undefined) payload.insertDate = data.insertDate;
+    if (data.hatchDate !== undefined) payload.hatchDate = data.hatchDate;
+    if (data.slaughterAge !== undefined) payload.slaughterAge = data.slaughterAge;
+    if (data.isOpen !== undefined) payload.isOpen = data.isOpen;
+    if (data.isVisible !== undefined) payload.isVisible = data.isVisible;
+    payload.updatedAt = Date.now();
+
+    if (shouldInitializeNew) {
         await setDoc(batchDocRef, {
             [batchId]: {
-                name: data.name,
                 isOpen: true,
                 isVisible: true,
-                expectedPairs: Math.max(0, Math.floor(data.expectedPairs || 0)),
-                hatchDate: data.hatchDate,
-                slaughterAge: data.slaughterAge,
+                initialEggs: 0,
+                hatchedChicks: 0,
+                hatchRate: 0,
+                expectedPairs: 0,
                 stock: {},
-                booked: {}
+                booked: {},
+                ...payload
             }
         }, { merge: true });
-    } else {
-        const safePatch = {};
-        if (data.name !== undefined) safePatch.name = data.name;
-        if (data.expectedPairs !== undefined) {
-            safePatch.expectedPairs = Math.max(0, Math.floor(data.expectedPairs));
-        }
-        if (data.slaughterAge !== undefined) safePatch.slaughterAge = data.slaughterAge;
-        if (data.isOpen !== undefined) safePatch.isOpen = data.isOpen;
-        if (data.isVisible !== undefined) safePatch.isVisible = data.isVisible;
-
-        if (Object.keys(safePatch).length > 0) {
-            await setDoc(batchDocRef, { [batchId]: safePatch }, { merge: true });
-        }
+    } else if (Object.keys(payload).length > 0) {
+        await setDoc(batchDocRef, { [batchId]: payload }, { merge: true });
     }
 }
 
