@@ -1,0 +1,19 @@
+{
+  "name": "saman-hehia-farm-erp",
+  "version": "2.0.0",
+  "description": "نظام إدارة مزرعة سمان ههيا - تطبيق أندرويد وويب",
+  "private": true,
+  "scripts": {
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/status-bar": "^6.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
