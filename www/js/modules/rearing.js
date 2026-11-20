@@ -1,5 +1,5 @@
 // www/js/modules/rearing.js
-// إدارة الفقس، عنابر التربية، اليوميات (علف/نافق)، دليل العامل الذكي، والمزامنة اللحظية مع الـ CRM
+// إدارة الفقس، عنابر التربية، اليوميات (علف/نافق)، دليل العامل الذكي، والمزامنة الكاملة مع الـ CRM
 
 import { db, ref, push, update, atomicAdjust, syncBatchToCRM, crmDb, doc, getDoc } from '../config/firebase.js';
 import {
@@ -8,7 +8,7 @@ import {
 import { showToast, openModal, closeModal, withActionLock } from '../core/ui.js';
 import { parsePositiveNumber, escapeHtml } from '../core/validators.js';
 import { consumeFeedFromStock, recordBatchCost } from '../core/accounting.js';
-import { clearShelvesForBatch } from './incubator.js';
+import { clearShelvesForBatch, buildIncubatorCrmPayload } from './incubator.js';
 
 export function promptHatch(id) {
     const b = state.batches[id];
@@ -28,7 +28,7 @@ export function promptHatch(id) {
     document.getElementById('hRearingDate').value = toLocalInput(hatchDateObj);
     document.getElementById('hSlaughterAge').value = slAge;
     document.getElementById('hExpectedSlaughterDate').value = toLocalInput(slaughterDateObj);
-    document.getElementById('hNewBatchName').value = `دفعة ${slaughterDateObj.getDate()}/${slaughterDateObj.getMonth() + 1}`;
+    document.getElementById('hNewBatchName').value = `تربية ${slaughterDateObj.getDate()}/${slaughterDateObj.getMonth() + 1}`;
 
     openModal('modalHatch');
 }
@@ -42,7 +42,7 @@ export function syncHatchSlaughterDate() {
     if (isNaN(d.getTime())) return;
     const slDate = new Date(d.getTime() + slAge * 86400000);
     document.getElementById('hExpectedSlaughterDate').value = toLocalInput(slDate);
-    document.getElementById('hNewBatchName').value = `دفعة ${slDate.getDate()}/${slDate.getMonth() + 1}`;
+    document.getElementById('hNewBatchName').value = `تربية ${slDate.getDate()}/${slDate.getMonth() + 1}`;
 }
 
 export async function moveToRearing() {
@@ -73,12 +73,11 @@ export async function moveToRearing() {
             ? new Date(slaughterDateStr)
             : new Date(hatchDateObj.getTime() + slAge * 86400000);
 
-        const finalName = customName || `دفعة ${slaughterDateObj.getDate()}/${slaughterDateObj.getMonth() + 1}`;
+        const finalName = customName || `تربية ${slaughterDateObj.getDate()}/${slaughterDateObj.getMonth() + 1}`;
         const hatchRate = initialEggs > 0 ? Number(((healthy / initialEggs) * 100).toFixed(1)) : 0;
         const expectedPairs = calcCrmExpectedPairs(healthy);
         const bufferDays = Number(state.settings.crmExtraBufferDays ?? 5);
 
-        // 1. تحديث الدفعة في قاعدة بيانات المزرعة
         await update(ref(db, `batches/${id}`), {
             name: finalName,
             hatchDate: hatchDateObj.toISOString(),
@@ -93,10 +92,8 @@ export async function moveToRearing() {
             crmExpectedPairs: expectedPairs
         });
 
-        // 2. تفريغ أي أرفف مرتبطة بها في خريطة المكنة
         await clearShelvesForBatch(id);
 
-        // 3. تسجيل تكلفة الكتاكيت داخلياً لحساب ربحية الدفعة (لا تلمس الخزنة أو مصروفات الشهر!)
         let chickUnitPrice = Number(state.settings.quailChick) || 3.5;
         if (b.birdType === 'chicken') chickUnitPrice = Number(state.settings.chickenChick) || 25;
         else if (b.birdType === 'turkey') chickUnitPrice = Number(state.settings.turkeyChick) || 60;
@@ -112,15 +109,25 @@ export async function moveToRearing() {
             });
         }
 
-        // 4. ترحيل للـ CRM (Firestore) مع حماية تامة
-        let crmMsg = ' وترحيلها للـ CRM';
+        let crmMsg = ` وترحيل (${healthy}/${initialEggs} | فقس ${hatchRate}%) للـ CRM`;
         try {
             await syncBatchToCRM(id, {
                 name: finalName,
+                stage: 'rearing',
+                birdType: b.birdType || 'quail',
+                initialEggs,
+                hatchedChicks: healthy,
+                hatchRate,
+                unfertilized: unfert,
+                deadInShell: dead,
+                aliveBirds: healthy,
+                expectedChicks: healthy,
                 expectedPairs,
                 hatchDate: hatchDateObj.getTime(),
-                slaughterAge: slAge + bufferDays
-            }, true);
+                slaughterAge: slAge + bufferDays,
+                isOpen: true,
+                isVisible: true
+            }, false);
         } catch (err) {
             console.error('CRM Sync Error:', err);
             crmMsg = ' (تعذر الترحيل للـ CRM - يمكنك المزامنة لاحقاً)';
@@ -128,7 +135,7 @@ export async function moveToRearing() {
 
         closeModal('modalHatch');
         showToast(`تم نقل "${finalName}" للتربية${crmMsg} 🚀`);
-    }, 'جاري إتمام الفقس والترحيل...');
+    }, 'جاري إتمام الفقس وتحديث الـ CRM...');
 }
 
 export function openDailyRearingModal(preselectedBatchId = null) {
@@ -158,7 +165,6 @@ export async function saveDailyLog() {
             return showToast(`❌ خطأ: المتبقي بالعنبر ${aliveBirds} طائر وأنت تحاول تسجيل ${dead} نافق!`, true);
         }
 
-        // 1. سحب العلف ذرياً بمتوسط السعر المرجّح وتسجيله كتكلفة على الدفعة (دون المساس بمصروفات الشهر النقدية)
         if (feed > 0) {
             await consumeFeedFromStock({
                 qtyKg: feed,
@@ -167,7 +173,6 @@ export async function saveDailyLog() {
             });
         }
 
-        // 2. تسجيل اليومية في تاريخ الدفعة وتحديث إجمالياتها ذرياً
         await push(ref(db, `batches/${id}/dailyLogs`), {
             date: todayISO(),
             dead,
@@ -182,13 +187,15 @@ export async function saveDailyLog() {
             await atomicAdjust(`batches/${id}/totalFeed`, feed, { allowNegative: false, decimals: 2 });
         }
 
-        // 3. عند تسجيل نافق، تحديث الأجواز المتوقعة في الـ CRM لحظياً دون لمس الحجوزات!
         if (dead > 0) {
             const newAlive = Math.max(0, aliveBirds - dead);
             const newExpectedPairs = calcCrmExpectedPairs(newAlive);
             await update(ref(db, `batches/${id}`), { crmExpectedPairs: newExpectedPairs });
             try {
-                await syncBatchToCRM(id, { expectedPairs: newExpectedPairs }, false);
+                await syncBatchToCRM(id, {
+                    aliveBirds: newAlive,
+                    expectedPairs: newExpectedPairs
+                }, false);
             } catch (err) {
                 console.warn('CRM live expectedPairs update skipped:', err);
             }
@@ -200,16 +207,20 @@ export async function saveDailyLog() {
 }
 
 /**
- * مزامنة آمنة لجميع دفعات التربية النشطة مع الـ CRM (تُنشئ الجديد وتُحدّث الموجود دون مسح الحجوزات!)
+ * مزامنة آمنة وشاملة لكل الدفعات النشطة (المفرخ "عمر يوم" + عنابر التربية) مع الـ CRM دون مسح حجوزات العملاء!
  */
 export async function syncLegacyBatchesToCRM() {
-    const rearingEntries = Object.entries(state.batches).filter(([, b]) => b.status === 'rearing');
-    if (rearingEntries.length === 0) {
-        return showToast('لا توجد دفعات نشطة في التربية لمزامنتها', true);
+    const activeEntries = Object.entries(state.batches).filter(([, b]) =>
+        b.status === 'incubator' || b.status === 'hatcher' || b.status === 'rearing'
+    );
+    if (activeEntries.length === 0) {
+        return showToast('لا توجد دفعات نشطة في المفرخ أو التربية لمزامنتها', true);
     }
-    if (!confirm(`تم العثور على (${rearingEntries.length}) دفعة في التربية.
-سيتم مزامنة المتاح المتوقع مع الـ CRM بدون التأثير على حجوزات العملاء.
-هل تريد المتابعة؟`)) {
+
+    const incCount = activeEntries.filter(([, b]) => b.status === 'incubator' || b.status === 'hatcher').length;
+    const rearCount = activeEntries.filter(([, b]) => b.status === 'rearing').length;
+
+    if (!confirm(`تم العثور على (${incCount}) دفعة عمر يوم بالمفرخ + (${rearCount}) دفعة بالتربية.\nسيتم مزامنتها كلها مع الـ CRM مع حفظ عدد البيض والفقس بدون التأثير على حجوزات العملاء.\nهل تريد المتابعة؟`)) {
         return;
     }
 
@@ -222,26 +233,45 @@ export async function syncLegacyBatchesToCRM() {
         let createdCount = 0;
         let updatedCount = 0;
 
-        for (const [id, b] of rearingEntries) {
-            const alive = Math.max(0, (Number(b.hatchedChicks) || 0) - (Number(b.totalDead) || 0));
-            const expectedPairs = calcCrmExpectedPairs(alive);
-            const hatchDateObj = b.hatchDate ? new Date(b.hatchDate) : new Date();
-            const slAge = b.slaughterAge || getBirdStandard(b.birdType || 'quail').slaughter;
+        for (const [id, b] of activeEntries) {
             const existsInCRM = Boolean(existingCRM[id]);
 
-            await syncBatchToCRM(id, {
-                name: b.name,
-                expectedPairs,
-                hatchDate: hatchDateObj.getTime(),
-                slaughterAge: slAge + bufferDays
-            }, !existsInCRM);
+            if (b.status === 'incubator' || b.status === 'hatcher') {
+                await syncBatchToCRM(id, buildIncubatorCrmPayload(b), !existsInCRM);
+            } else {
+                const initialEggs = Number(b.initialEggs) || 0;
+                const hatched = Number(b.hatchedChicks) || 0;
+                const alive = Math.max(0, hatched - (Number(b.totalDead) || 0));
+                const expectedPairs = calcCrmExpectedPairs(alive);
+                const hatchDateObj = b.hatchDate ? new Date(b.hatchDate) : new Date();
+                const slAge = b.slaughterAge || getBirdStandard(b.birdType || 'quail').slaughter;
+                const hatchRate = b.hatchRate ?? (initialEggs > 0 ? Number(((hatched / initialEggs) * 100).toFixed(1)) : 0);
+
+                await syncBatchToCRM(id, {
+                    name: b.name,
+                    stage: 'rearing',
+                    birdType: b.birdType || 'quail',
+                    initialEggs,
+                    hatchedChicks: hatched,
+                    hatchRate,
+                    unfertilized: Number(b.unfertilized) || 0,
+                    deadInShell: Number(b.deadInShell) || 0,
+                    aliveBirds: alive,
+                    expectedChicks: hatched,
+                    expectedPairs,
+                    hatchDate: hatchDateObj.getTime(),
+                    slaughterAge: slAge + bufferDays,
+                    isOpen: true,
+                    isVisible: true
+                }, !existsInCRM);
+            }
 
             if (existsInCRM) updatedCount++;
             else createdCount++;
         }
 
-        showToast(`✅ تمت المزامنة: ${createdCount} جديدة + ${updatedCount} محدثة بأمان!`);
-    }, 'جاري المزامنة الآمنة مع الـ CRM...');
+        showToast(`✅ تمت المزامنة الكاملة: ${createdCount} جديدة + ${updatedCount} محدثة بأمان!`);
+    }, 'جاري المزامنة الشاملة مع الـ CRM...');
 }
 
 // ================= دليل العامل اليومي الذكي =================
@@ -260,7 +290,6 @@ function getQuailDailyNeeds(age, aliveCount, system) {
     const dailyWaterL = dailyFeedKg * 2.2;
     const spaceSqm = system === 'battery' ? (aliveCount / 120) : (aliveCount / 60);
 
-    // حساب الاستهلاك التراكمي المعياري حتى هذا العمر للمقارنة مع الفعلي
     let cumGramsPerBird = 0;
     for (let d = 1; d <= age; d++) {
         if (d <= 3) cumGramsPerBird += 4;
