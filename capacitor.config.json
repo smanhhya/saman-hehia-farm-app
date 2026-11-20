@@ -1,0 +1,21 @@
+{
+  "appId": "com.samanhehia.farm",
+  "appName": "إدارة سمان ههيا",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*.firebaseio.com",
+      "*.googleapis.com",
+      "*.gstatic.com",
+      "*.firebaseapp.com"
+    ]
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": false,
+      "style": "DARK",
+      "backgroundColor": "#2563eb"
+    }
+  }
+}
