@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>سمان ههيا ERP — نظام إدارة المزارع الشامل</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./css/style.css">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="سمان ههيا ERP">
+    <meta name="theme-color" content="#2563eb">
+
+    <script>
+        (function () {
+            const t = localStorage.getItem('saman_theme') || localStorage.getItem('erp_theme') || 'light';
+            const c = localStorage.getItem('saman_accent') || localStorage.getItem('erp_primary_color') || '#2563eb';
+            document.documentElement.setAttribute('data-theme', t);
+            document.documentElement.style.setProperty('--primary', c);
+        })();
+    </script>
+</head>
+<body>
+
+    <!-- التنبيهات وشاشة التحميل -->
+    <div id="toast"></div>
+    <div id="globalLoader">
+        <div class="loader-card">
+            <div class="spinner"></div>
+            <div id="globalLoaderText" style="font-weight:700;">جاري التنفيذ...</div>
+        </div>
+    </div>
+
+    <!-- الشريط العلوي للموبايل -->
+    <header class="mobile-topbar">
+        <div class="topbar-brand">
+            <div class="brand-badge"><i class="fas fa-kiwi-bird"></i></div>
+            <span class="farm-brand-text">سمان ههيا ERP</span>
+        </div>
+        <div class="topbar-actions">
+            <span class="conn-pill"><span id="connStatusDot" class="conn-dot"></span><span id="connStatusText">جاري الاتصال</span></span>
+            <button class="icon-circle-btn" onclick="openCommandPalette()" title="بحث سريع"><i class="fas fa-search"></i></button>
+            <button class="icon-circle-btn" onclick="toggleAppTheme()" title="الوضع الليلي"><i id="themeIcon" class="fas fa-moon"></i></button>
+        </div>
+    </header>
+
+    <!-- القائمة الجانبية للديسكتوب -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="topbar-brand">
+                <div class="brand-badge"><i class="fas fa-kiwi-bird"></i></div>
+                <span class="farm-brand-text">سمان ههيا ERP</span>
+            </div>
+            <button class="icon-circle-btn" onclick="toggleAppTheme()" title="تبديل المظهر"><i class="fas fa-circle-half-stroke"></i></button>
+        </div>
+
+        <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')"><i class="fas fa-chart-pie"></i><span>لوحة القيادة</span></div>
+        <div class="nav-item" data-page="breeders" onclick="switchPage('breeders')"><i class="fas fa-venus-mars"></i><span>قطيع الأمهات</span></div>
+        <div class="nav-item" data-page="incubator" onclick="switchPage('incubator')"><i class="fas fa-temperature-half"></i><span>المفرخ والمفقس</span></div>
+        <div class="nav-item" data-page="rearing" onclick="switchPage('rearing')"><i class="fas fa-kiwi-bird"></i><span>عنابر التربية</span></div>
+        <div class="nav-item" data-page="freezer" onclick="switchPage('freezer')"><i class="fas fa-snowflake"></i><span>المخزون والفريزر</span></div>
+        <div class="nav-item" data-page="finance" onclick="switchPage('finance')"><i class="fas fa-wallet"></i><span>المركز المالي</span></div>
+        <div class="nav-item" data-page="reports" onclick="switchPage('reports')"><i class="fas fa-chart-line"></i><span>تقارير الربحية P&L</span></div>
+        <div class="nav-item" data-page="inventory" onclick="switchPage('inventory')"><i class="fas fa-boxes"></i><span>جرد المعدات</span></div>
+        <div style="flex:1;"></div>
+        <div class="nav-item" onclick="openCommandPalette()"><i class="fas fa-magnifying-glass"></i><span>بحث سريع (Ctrl+K)</span></div>
+        <div class="nav-item" data-page="settingsPage" onclick="switchPage('settingsPage')"><i class="fas fa-sliders-h"></i><span>مركز الإعدادات</span></div>
+    </aside>
+
+    <!-- شريط الموبايل السفلي المريح (5 أزرار متوازنة) -->
+    <nav class="bottom-nav">
+        <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')"><i class="fas fa-chart-pie"></i><span>الرئيسية</span></div>
+        <div class="nav-item" data-page="breeders" onclick="switchPage('breeders')"><i class="fas fa-venus-mars"></i><span>الأمهات</span></div>
+        <div class="nav-item" data-page="incubator" onclick="switchPage('incubator')"><i class="fas fa-temperature-half"></i><span>المفرخ</span></div>
+        <div class="nav-item" data-page="rearing" onclick="switchPage('rearing')"><i class="fas fa-kiwi-bird"></i><span>التربية</span></div>
+        <div class="nav-item" id="mobileMoreBtn" onclick="openModal('modalMoreMenu')"><i class="fas fa-th-large"></i><span>المزيد</span></div>
+    </nav>
+
+    <!-- الزر السريع العائم (FAB) -->
+    <div class="fab-container">
+        <button id="fabMainBtn" class="fab" onclick="toggleFab()" title="إجراءات سريعة"><i class="fas fa-plus"></i></button>
+        <div class="fab-menu" id="fabMenu">
+            <button class="fab-btn" onclick="openDailyRearingModal(); toggleFab()"><i class="fas fa-clipboard-list text-warning"></i> علف / نافق تربية</button>
+            <button class="fab-btn" onclick="openTriageModal(); toggleFab()"><i class="fas fa-egg text-primary"></i> فرز بيض الأمهات</button>
+            <button class="fab-btn" onclick="openBreederDailyModal(); toggleFab()"><i class="fas fa-venus-mars" style="color:var(--purple);"></i> يومية الأمهات</button>
+            <button class="fab-btn" onclick="openSaleModal(); toggleFab()"><i class="fas fa-shopping-cart text-success"></i> بيع سريع (فريزر)</button>
+            <button class="fab-btn" onclick="openNewBatchModal(); toggleFab()"><i class="fas fa-plus-circle text-info"></i> دفعة تفريخ جديدة</button>
+        </div>
+    </div>
+
+    <!-- المحتوى الرئيسي -->
+    <main class="main-content">
+
+        <!-- ================= 1. لوحة القيادة ================= -->
+        <section id="dashboard" class="page-view active">
+            <div class="header-title">
+                <h1><i class="fas fa-chart-pie text-primary"></i> لوحة القيادة</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary btn-sm" onclick="openNewBatchModal()"><i class="fas fa-plus"></i> دفعة جديدة</button>
+                    <button class="btn btn-success btn-sm" onclick="openSaleModal()"><i class="fas fa-shopping-cart"></i> بيع فريزر</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="grid-3">
+                    <button class="btn btn-warning btn-sm" style="width:100%; padding:12px;" onclick="openDailyRearingModal()"><i class="fas fa-clipboard-list"></i> علف / نافق</button>
+                    <button class="btn btn-primary btn-sm" style="width:100%; padding:12px;" onclick="openTriageModal()"><i class="fas fa-egg"></i> فرز البيض</button>
+                    <button class="btn btn-purple btn-sm" style="width:100%; padding:12px;" onclick="switchPage('reports')"><i class="fas fa-chart-line"></i> تقارير P&L</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span>ملخص المزرعة اللحظي</span>
+                    <span class="sub-text">اضغط على أي بطاقة للتفاصيل</span>
+                </div>
+                <div class="grid-auto">
+                    <div class="stat-box clickable" onclick="switchPage('incubator')">بالماكينة<span class="num text-info" id="dashEggs">0</span><span class="sub-text">بيضة</span></div>
+                    <div class="stat-box clickable" onclick="switchPage('rearing')">بعنابر التربية<span class="num text-warning" id="dashChicks">0</span><span class="sub-text">طائر</span></div>
+                    <div class="stat-box clickable" style="border-color:var(--success);" onclick="switchPage('freezer')">رصيد الفريزر<span class="num text-success" id="dashFreezer">0</span><span class="sub-text">وحدة/جوز</span></div>
+                    <div class="stat-box clickable" style="border-color:var(--primary);" onclick="switchPage('finance')">الرصيد الحر<span class="num text-primary" id="dashCumulativeBalance" dir="ltr">0</span><span class="sub-text">ج.م تراكمي</span></div>
+                    <div class="stat-box clickable" onclick="switchPage('finance')">صافي الشهر الجاري<span class="num" id="dashMonthNet" dir="ltr">0</span><span class="sub-text">ج.م مفتوح</span></div>
+                    <div class="stat-box clickable" style="border-color:var(--info);" onclick="switchPage('inventory')">أصول ومعدات<span class="num text-info" id="dashInventoryTotal">0</span><span class="sub-text">ج.م</span></div>
+                </div>
+            </div>
+
+            <div class="card" style="border-right:4px solid var(--warning);">
+                <div class="card-header text-warning">
+                    <span><i class="fas fa-wheat-awn"></i> مخزن العلف العيني</span>
+                    <button class="btn btn-warning btn-sm" onclick="openBuyFeedModal()"><i class="fas fa-truck-loading"></i> توريد علف</button>
+                </div>
+                <div style="text-align:center; padding:8px 0;">
+                    <div style="font-size:34px; font-weight:800;" id="feedStockDisplay">0 كجم</div>
+                    <div class="sub-text" id="feedAvgCostDisplay" style="margin-top:6px;">متوسط تكلفة الكيلو الفعلي: 30 ج.م</div>
+                </div>
+            </div>
+
+            <div class="card" style="border-right:4px solid var(--danger);">
+                <div class="card-header text-danger">
+                    <span><i class="fas fa-bell"></i> لوحة التنبيهات والإنذار المبكر</span>
+                </div>
+                <div id="alertsContainer">جاري فحص حالة المزرعة...</div>
+            </div>
+        </section>
+
+        <!-- ================= 2. قطيع الأمهات والمفرخ التفاعلي ================= -->
+        <section id="breeders" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-venus-mars text-primary"></i> قطيع الأمهات والمفرخ</h1>
+                <div class="header-actions">
+                    <button class="btn btn-warning btn-sm" onclick="openFlockSetupModal()"><i class="fas fa-gear"></i> تأسيس/تعديل القطيع</button>
+                    <button class="btn btn-purple btn-sm" onclick="openBreederDailyModal()"><i class="fas fa-clipboard-list"></i> يومية الأمهات</button>
+                </div>
+            </div>
+
+            <div class="card" style="border-right:4px solid var(--info);">
+                <div class="card-header">
+                    <span>حالة قطيع الأمهات</span>
+                    <span id="fertilityBadge" class="badge" style="background:var(--success);">إخصاب متوقع: 0%</span>
+                </div>
+                <div class="grid-auto">
+                    <div class="stat-box">إجمالي القطيع<span class="num text-info" id="activeMothersCount">0</span></div>
+                    <div class="stat-box" style="border-color:#ec4899;">إناث (بياض)<span class="num" style="color:#ec4899;" id="activeFemalesCount">0</span></div>
+                    <div class="stat-box" style="border-color:#0ea5e9;">ذكور (تلقيح)<span class="num" style="color:#0ea5e9;" id="activeMalesCount">0</span></div>
+                    <div class="stat-box">العمر الحقيقي<span class="num text-warning" id="flockAgeDisplay">0</span><span class="sub-text">أسبوع</span></div>
+                    <div class="stat-box" style="border-color:var(--success);">بيض للتفريخ<span class="num text-success" id="readyEggsCount">0</span></div>
+                    <div class="stat-box clickable" onclick="openSellTableEggsModal()" style="border-color:var(--purple);">بيض مائدة (للبيع)<span class="num" style="color:var(--purple);" id="tableEggsCount">0</span></div>
+                </div>
+
+                <div class="grid-3" style="margin-top:14px;">
+                    <button class="btn btn-primary btn-sm" style="width:100%; padding:11px;" onclick="openTriageModal()"><i class="fas fa-egg"></i> فرز البيض الذكي</button>
+                    <button class="btn btn-success btn-sm" style="width:100%; padding:11px;" onclick="openSellTableEggsModal()"><i class="fas fa-coins"></i> بيع بيض مائدة</button>
+                    <button class="btn btn-purple btn-sm" style="width:100%; padding:11px;" onclick="openBreederGuide()"><i class="fas fa-brain"></i> مستشار الأمهات</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span><i class="fas fa-server"></i> خريطة مكنة التفريخ التفاعلية</span>
+                    <span class="sub-text">اضغط على أي رف فارغ لتحميله (مع الدمج الذكي لنفس اليوم)</span>
+                </div>
+                <div id="incubatorGrid" class="shelf-grid"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><i class="fas fa-clock-rotate-left"></i> أحدث سجلات فرز البيض</div>
+                <div id="breedersRecentLogs"></div>
+            </div>
+        </section>
+
+        <!-- ================= 3. إدارة التفريخ والمفقس ================= -->
+        <section id="incubator" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-temperature-half text-info"></i> المفرخ والمفقس</h1>
+                <button class="btn btn-primary btn-sm" onclick="openNewBatchModal()"><i class="fas fa-plus"></i> دفعة جديدة</button>
+            </div>
+            <div id="incubatorList"></div>
+        </section>
+
+        <!-- ================= 4. عنابر التربية والذبح ================= -->
+        <section id="rearing" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-kiwi-bird text-warning"></i> عنابر التربية والذبح</h1>
+                <div class="header-actions">
+                    <button class="btn btn-warning btn-sm" onclick="openDailyRearingModal()"><i class="fas fa-clipboard-list"></i> علف / نافق</button>
+                    <button class="btn btn-info btn-sm" onclick="syncLegacyBatchesToCRM()"><i class="fas fa-rotate"></i> مزامنة مع الـ CRM</button>
+                </div>
+            </div>
+            <div id="rearingList"></div>
+            <div class="section-pill pill-danger" style="margin-top:24px;"><i class="fas fa-utensils"></i> دفعات قيد الذبح والتجهيز</div>
+            <div id="slaughterList"></div>
+        </section>
+
+        <!-- ================= 5. المخزون والفريزر ================= -->
+        <section id="freezer" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-snowflake text-info"></i> المخزون والفريزر (FIFO)</h1>
+                <div class="header-actions">
+                    <button class="btn btn-success btn-sm" onclick="openSaleModal()"><i class="fas fa-shopping-cart"></i> فاتورة بيع</button>
+                    <button class="btn btn-primary btn-sm" onclick="openModal('modalManageFreezer')"><i class="fas fa-cog"></i> إدارة الأصناف</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span>الأرصدة المتاحة حالياً (اضغط للتعديل)</span>
+                    <span class="sub-text">القيمة البيعية التقديرية: <b class="text-success" id="freezerTotalMarketValue">0 ج.م</b></span>
+                </div>
+                <div class="grid-3" id="freezerGrid"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span><i class="fas fa-layer-group"></i> سجل الإيداعات وتتبع العمر (FIFO)</span>
+                    <button class="btn btn-danger btn-sm" onclick="toggleLogDeletion()"><i class="fas fa-trash-alt"></i> وضع الحذف</button>
+                </div>
+                <div id="freezerLogs"></div>
+            </div>
+        </section>
+
+        <!-- ================= 6. المركز المالي والتقفيل ================= -->
+        <section id="finance" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-wallet text-primary"></i> المركز المالي والتقفيل</h1>
+                <div class="header-actions">
+                    <button class="btn btn-danger btn-sm" onclick="openExpenseModal()"><i class="fas fa-plus"></i> تسجيل حركة مالية</button>
+                    <button class="btn btn-warning btn-sm" onclick="closeMonth()"><i class="fas fa-lock"></i> تقفيل الشهر</button>
+                </div>
+            </div>
+
+            <div class="card hero-finance-card">
+                <span style="opacity:0.9; font-size:13px;">الرصيد التراكمي الحر (صافي الأرباح المرحلة)</span>
+                <div class="hero-amount" id="cumulativeBalanceDisplay" dir="ltr">0 ج.م</div>
+                <span class="hero-pill">مستقل تماماً عن أصول المعدات الثابتة</span>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span><i class="fas fa-chart-line"></i> حركة الشهر المفتوح حالياً</span>
+                    <button class="btn btn-ghost btn-sm" onclick="editCashBox()"><i class="fas fa-money-bill-wave text-success"></i> الخزنة: <b id="cashBoxDisplay">0 ج.م</b></button>
+                </div>
+                <div class="grid-3">
+                    <div class="stat-box" style="border-color:var(--success);">إيرادات الشهر<span class="num text-success" id="currentMonthRevenue">0 ج.م</span></div>
+                    <div class="stat-box" style="border-color:var(--danger);">مصروفات الشهر<span class="num text-danger" id="currentMonthExpenses">0 ج.م</span></div>
+                    <div class="stat-box" style="border-color:var(--primary);">صافي الشهر الجاري<span class="num" id="currentMonthNet" dir="ltr">0 ج.م</span></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><i class="fas fa-list"></i> سجل حركات الشهر الحالي</div>
+                <div class="search-bar-container">
+                    <input type="text" placeholder="ابحث في الوصف أو التاريخ..." oninput="searchLedger(this.value)">
+                    <select onchange="filterLedger(this.value)">
+                        <option value="all">كل الحركات</option>
+                        <option value="in">إيرادات فقط (+)</option>
+                        <option value="out">مصروفات نقدية (-)</option>
+                        <option value="batch_cost">تكاليف دورات داخلية (عيني)</option>
+                    </select>
+                </div>
+                <div id="ledgerList"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><i class="fas fa-box-archive"></i> أرشيف الدفعات المصفاة</div>
+                <div id="archivedBatchesList"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><i class="fas fa-calendar-check"></i> سجل التقفيلات الشهرية</div>
+                <div id="monthlyClosingsList"></div>
+            </div>
+        </section>
+
+        <!-- ================= 7. تقارير الربحية (Batch P&L) ================= -->
+        <section id="reports" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-chart-line text-primary"></i> تقارير ربحية الدفعات (P&L)</h1>
+            </div>
+
+            <div class="card">
+                <div class="card-header">مؤشرات الأداء العامة للمزرعة</div>
+                <div id="farmKpiOverview"></div>
+            </div>
+
+            <div class="card">
+                <label style="margin-top:0;">اختر الدفعة لعرض البيان الفني والمالي المفصل</label>
+                <select id="reportBatchSelect" onchange="generateBatchReport()"></select>
+                <div id="batchReportContainer" style="margin-top:16px;"></div>
+            </div>
+        </section>
+
+        <!-- ================= 8. جرد المعدات والأصول الثابتة ================= -->
+        <section id="inventory" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-boxes text-info"></i> جرد المعدات والأصول</h1>
+                <button class="btn btn-info btn-sm" onclick="openAddInventoryModal()"><i class="fas fa-plus"></i> إضافة معدة</button>
+            </div>
+
+            <div class="card" style="border-right:4px solid var(--info); text-align:center;">
+                <span class="sub-text">إجمالي رأس المال الثابت (المعدات والأصول)</span>
+                <div style="font-size:34px; font-weight:800; color:var(--info); margin-top:6px;" id="inventoryTotalValue">0 ج.م</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">سجل المعدات</div>
+                <div id="inventoryList"></div>
+            </div>
+        </section>
+
+        <!-- ================= 9. مركز التحكم والإعدادات ================= -->
+        <section id="settingsPage" class="page-view">
+            <div class="header-title">
+                <h1><i class="fas fa-sliders-h text-primary"></i> مركز التحكم والإعدادات</h1>
+            </div>
+
+            <div class="settings-layout">
+                <div class="settings-sidebar">
+                    <div class="settings-search">
+                        <i class="fas fa-search"></i>
+                        <input type="text" placeholder="ابحث في الإعدادات..." oninput="filterSettingsSearch(this.value)">
+                    </div>
+                    <div class="settings-nav-item active" onclick="switchSettingsTab('general', this)"><i class="fas fa-globe"></i> عام والمظهر</div>
+                    <div class="settings-nav-item" onclick="switchSettingsTab('farmOps', this)"><i class="fas fa-tractor"></i> التسعير والتشغيل</div>
+                    <div class="settings-nav-item" onclick="switchSettingsTab('incCrm', this)"><i class="fas fa-server"></i> المكنة وربط CRM</div>
+                    <div class="settings-nav-item" onclick="switchSettingsTab('backup', this)"><i class="fas fa-cloud-arrow-down"></i> النسخ الاحتياطي</div>
+                </div>
+
+                <div class="settings-content-area">
+                    <!-- تبويب عام والمظهر -->
+                    <div id="tab-general" class="settings-tab active">
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">الهوية العامة</h3>
+                            <label>اسم المزرعة / النظام</label>
+                            <input type="text" id="setFarmName" placeholder="سمان ههيا ERP">
+                            <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ الاسم</button>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">الوضع العام (Theme)</h3>
+                            <div class="grid-2">
+                                <div class="theme-option" data-theme-mode="light" onclick="setThemeMode('light')">
+                                    <i class="fas fa-sun" style="font-size:24px; color:#f59e0b;"></i>
+                                    <div style="font-weight:700; margin-top:6px;">الوضع الفاتح</div>
+                                </div>
+                                <div class="theme-option" data-theme-mode="dark" onclick="setThemeMode('dark')">
+                                    <i class="fas fa-moon" style="font-size:24px; color:#3b82f6;"></i>
+                                    <div style="font-weight:700; margin-top:6px;">الوضع الليلي</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">اللون الأساسي للنظام</h3>
+                            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                                <div class="color-circle" data-color="#2563eb" style="background:#2563eb;" onclick="setPrimaryColor('#2563eb')"></div>
+                                <div class="color-circle" data-color="#10b981" style="background:#10b981;" onclick="setPrimaryColor('#10b981')"></div>
+                                <div class="color-circle" data-color="#7c3aed" style="background:#7c3aed;" onclick="setPrimaryColor('#7c3aed')"></div>
+                                <div class="color-circle" data-color="#e11d48" style="background:#e11d48;" onclick="setPrimaryColor('#e11d48')"></div>
+                                <div class="color-circle" data-color="#d97706" style="background:#d97706;" onclick="setPrimaryColor('#d97706')"></div>
+                                <div class="color-circle" data-color="#0f172a" style="background:#0f172a;" onclick="setPrimaryColor('#0f172a')"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- تبويب التسعير والتشغيل -->
+                    <div id="tab-farmOps" class="settings-tab">
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">إعدادات العلف والطائر الافتراضي</h3>
+                            <div class="grid-3">
+                                <div>
+                                    <label>الطائر الافتراضي</label>
+                                    <select id="setBirdType">
+                                        <option value="quail">سمان</option>
+                                        <option value="chicken">فراخ بيضاء</option>
+                                        <option value="turkey">رومي</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>سعر كيلو العلف الافتراضي (ج)</label>
+                                    <input type="number" step="0.5" id="setFeed">
+                                </div>
+                                <div>
+                                    <label>حد تنبيه نقص العلف (كجم)</label>
+                                    <input type="number" id="setLowFeedThreshold">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">🥚 تسعير البيض (منفصل عن الكتاكيت)</h3>
+                            <div class="grid-3">
+                                <div><label>بيضة السمان (ج)</label><input type="number" step="0.25" id="setQuailEgg"></div>
+                                <div><label>بيضة الفراخ (ج)</label><input type="number" step="0.5" id="setChickenEgg"></div>
+                                <div><label>بيضة الرومي (ج)</label><input type="number" step="0.5" id="setTurkeyEgg"></div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">🐣 تسعير الكتاكيت (لتكلفة دورات التربية)</h3>
+                            <div class="grid-3">
+                                <div><label>كتكوت السمان (ج)</label><input type="number" step="0.25" id="setQuailChick"></div>
+                                <div><label>كتكوت الفراخ (ج)</label><input type="number" step="0.5" id="setChickenChick"></div>
+                                <div><label>كتكوت الرومي (ج)</label><input type="number" step="0.5" id="setTurkeyChick"></div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ إعدادات التشغيل</button>
+                    </div>
+
+                    <!-- تبويب المكنة وربط CRM -->
+                    <div id="tab-incCrm" class="settings-tab">
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">⚙️ مواصفات مكنة التفريخ</h3>
+                            <div class="grid-2">
+                                <div><label>عدد الأرفف بالمكنة</label><input type="number" id="setIncShelves" oninput="calcIncubatorTotalCap()"></div>
+                                <div><label>سعة الرف الواحد (بيضة)</label><input type="number" id="setIncShelfCapacity" oninput="calcIncubatorTotalCap()"></div>
+                            </div>
+                            <div class="info-box" style="text-align:center; margin-top:12px;">
+                                السعة الكلية للمكنة: <strong id="incTotalCapacityDisplay" class="text-primary" style="font-size:18px;">6,000</strong> بيضة
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">⏱️ المعايير الزمنية لدورات السمان (قابلة للتعديل)</h3>
+                            <div class="grid-3">
+                                <div><label>يوم النقل للمفقس</label><input type="number" id="setQuailHatcherDays"></div>
+                                <div><label>يوم الفقس</label><input type="number" id="setQuailHatchDays"></div>
+                                <div><label>عمر الذبح (أيام)</label><input type="number" id="setQuailSlaughterDays"></div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">🔗 ربط المبيعات (CRM Firestore)</h3>
+                            <div class="grid-2">
+                                <div><label>نسبة أمان النافق للـ CRM (%)</label><input type="number" id="setCrmSafetyMargin"></div>
+                                <div><label>أيام أمان إضافية للعميل (يوم)</label><input type="number" id="setCrmExtraDays"></div>
+                            </div>
+                            <button class="btn btn-info btn-sm" style="margin-top:12px;" onclick="syncLegacyBatchesToCRM()"><i class="fas fa-rotate"></i> مزامنة دفعات التربية مع الـ CRM الآن</button>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ إعدادات المكنة والـ CRM</button>
+                    </div>
+
+                    <!-- تبويب النسخ الاحتياطي -->
+                    <div id="tab-backup" class="settings-tab">
+                        <div class="settings-card">
+                            <h3 style="margin-top:0;">📥 النسخ الاحتياطي والاستعادة (JSON)</h3>
+                            <p class="sub-text">احتفظ بنسخة كاملة من قاعدة بيانات المزرعة على جهازك ويمكنك استعادتها في أي وقت.</p>
+                            <div class="grid-2">
+                                <button class="btn btn-success" style="margin-top:0;" onclick="exportFullBackup()"><i class="fas fa-download"></i> تحميل نسخة احتياطية</button>
+                                <button class="btn btn-info" style="margin-top:0;" onclick="triggerImportBackup()"><i class="fas fa-upload"></i> استعادة من ملف</button>
+                            </div>
+                            <input type="file" id="backupFileInput" accept=".json" style="display:none;" onchange="handleImportBackup(event)">
+                        </div>
+
+                        <div class="settings-card" style="border-color:var(--danger);">
+                            <h3 style="margin-top:0; color:var(--danger);">⚠️ تصفير النظام (Factory Reset)</h3>
+                            <p class="sub-text">يمسح جميع الدفعات والمخازن والخزنة نهائياً. حمّل نسخة احتياطية قبل استخدامه.</p>
+                            <button class="btn btn-danger" onclick="resetSystem()">تصفير بيانات النظام بالكامل</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ================= النوافذ المنبثقة (MODALS) ================= -->
+
+    <!-- قائمة المزيد للموبايل -->
+    <div id="modalMoreMenu" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalMoreMenu')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0;">أقسام النظام</h3>
+            <div class="more-grid">
+                <div class="more-tile" onclick="switchPage('freezer')"><i class="fas fa-snowflake text-info"></i><span>الفريزر</span></div>
+                <div class="more-tile" onclick="switchPage('finance')"><i class="fas fa-wallet text-success"></i><span>الماليات</span></div>
+                <div class="more-tile" onclick="switchPage('reports')"><i class="fas fa-chart-line text-primary"></i><span>تقارير P&L</span></div>
+                <div class="more-tile" onclick="switchPage('inventory')"><i class="fas fa-boxes text-warning"></i><span>جرد المعدات</span></div>
+                <div class="more-tile" onclick="switchPage('settingsPage')"><i class="fas fa-sliders-h" style="color:var(--purple);"></i><span>الإعدادات</span></div>
+                <div class="more-tile" onclick="closeModal('modalMoreMenu'); syncLegacyBatchesToCRM()"><i class="fas fa-rotate text-info"></i><span>مزامنة CRM</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- إضافة دفعة جديدة -->
+    <div id="modalBatch" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalBatch')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--info);">🥚 إدخال دفعة تفريخ جديدة</h3>
+            <label>نوع الطائر</label>
+            <select id="bBirdType" onchange="autoCalcDates(true)">
+                <option value="quail">سمان</option>
+                <option value="chicken">فراخ بيضاء</option>
+                <option value="turkey">رومي</option>
+            </select>
+            <label>اسم الدفعة</label>
+            <input type="text" id="bName" placeholder="دفعة 2026-11-20">
+            <div class="grid-2">
+                <div><label>عدد البيض الكلي</label><input type="number" id="bEggs" placeholder="مثال: 1000"></div>
+                <div><label>تاريخ الدخول</label><input type="datetime-local" id="bDate" onchange="autoCalcDates(false)"></div>
+            </div>
+            <div class="info-box" style="margin-top:14px;">
+                <div style="font-weight:700; color:var(--primary); margin-bottom:6px;">التواريخ المتوقعة (قابلة للتعديل) 📅</div>
+                <div class="grid-2">
+                    <div><label style="margin-top:4px;">النزول للمفقس</label><input type="datetime-local" id="bHatcherDate"></div>
+                    <div><label style="margin-top:4px;">موعد الفقس</label><input type="datetime-local" id="bHatchDate"></div>
+                    <div><label>عمر الذبح (أيام)</label><input type="number" id="bSlaughterDays" value="38" oninput="autoCalcDates(false)"></div>
+                    <div><label>تاريخ الذبح</label><input type="datetime-local" id="bSlaughterDate"></div>
+                </div>
+            </div>
+            <button class="btn btn-info" onclick="saveNewBatch()">بدء الدورة</button>
+        </div>
+    </div>
+
+    <!-- تعديل دفعة -->
+    <div id="modalEditBatch" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalEditBatch')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--info);">✏️ تعديل بيانات الدفعة</h3>
+            <input type="hidden" id="editBatchId">
+            <input type="hidden" id="editBatchStage">
+            <label>اسم الدفعة</label>
+            <input type="text" id="editBName">
+            <div class="grid-2">
+                <div><label id="editQtyLabel">العدد</label><input type="number" id="editBEggs"></div>
+                <div><label id="editDateLabel">التاريخ</label><input type="datetime-local" id="editBDate" onchange="syncEditSlaughterDate()"></div>
+            </div>
+            <div id="editRearingSection" class="info-box" style="margin-top:14px; display:none;">
+                <div style="font-weight:700; color:var(--primary); margin-bottom:6px;">بيانات التربية والذبح 📅</div>
+                <div class="grid-2">
+                    <div><label style="margin-top:4px;">عمر الذبح (أيام)</label><input type="number" id="editSlaughterAge" oninput="syncEditSlaughterDate()"></div>
+                    <div><label style="margin-top:4px;">تاريخ الذبح المتوقع</label><input type="datetime-local" id="editSlaughterDate"></div>
+                </div>
+            </div>
+            <button class="btn btn-info" onclick="saveEditBatch()">حفظ التعديلات</button>
+        </div>
+    </div>
+
+    <!-- إتمام الفقس ونقل للتربية -->
+    <div id="modalHatch" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalHatch')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--primary);">🐣 إتمام الفقس ونقل للتربية</h3>
+            <input type="hidden" id="hatchBatchId">
+            <div class="info-box" style="margin-bottom:10px;">إجمالي بيض الدفعة: <strong id="hatchInitialEggsHint" class="text-primary">0</strong> بيضة</div>
+            <div class="grid-2">
+                <div><label>كتاكيت سليمة للتربية</label><input type="number" id="hHealthy" style="font-size:18px; color:var(--success);"></div>
+                <div>
+                    <label>نظام التربية</label>
+                    <select id="hRearingSystem">
+                        <option value="floor">أرضي (نشارة)</option>
+                        <option value="battery">بطاريات (أقفاص)</option>
+                    </select>
+                </div>
+                <div><label>غير مخصب</label><input type="number" id="hUnfert" value="0"></div>
+                <div><label>كبس / ميت بالبيضة</label><input type="number" id="hDead" value="0"></div>
+            </div>
+            <div class="info-box" style="margin-top:14px;">
+                <div style="font-weight:700; color:var(--primary); margin-bottom:6px;">تواريخ واسم دورة التربية (تُرحّل للـ CRM)</div>
+                <label style="margin-top:4px;">تاريخ الفقس الفعلي</label>
+                <input type="datetime-local" id="hRearingDate" onchange="syncHatchSlaughterDate()">
+                <label>اسم دفعة التربية</label>
+                <input type="text" id="hNewBatchName">
+                <div class="grid-2">
+                    <div><label>عمر الذبح (أيام)</label><input type="number" id="hSlaughterAge" value="38" oninput="syncHatchSlaughterDate()"></div>
+                    <div><label>تاريخ الذبح المتوقع</label><input type="datetime-local" id="hExpectedSlaughterDate"></div>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="moveToRearing()">تأكيد النقل للتربية والـ CRM 🚀</button>
+        </div>
+    </div>
+
+    <!-- تسجيل يومي للتربية -->
+    <div id="modalDaily" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalDaily')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--warning);">📝 يومية عنبر التربية</h3>
+            <label>الدفعة</label>
+            <select id="dBatch"></select>
+            <div class="grid-2">
+                <div><label>النافق اليوم (طائر)</label><input type="number" id="dDead" value="0"></div>
+                <div><label>العلف المسحوب (كجم)</label><input type="number" step="0.1" id="dFeed" value="0"></div>
+            </div>
+            <div class="sub-text" style="margin-top:10px;">* يتم خصم العلف من المخزن، وتحديث تكلفة الدفعة بالمتوسط المرجّح، وتحديث المتوقع في الـ CRM تلقائياً عند وجود نافق.</div>
+            <button class="btn btn-warning" onclick="saveDailyLog()">حفظ اليومية</button>
+        </div>
+    </div>
+
+    <!-- بيع بيض من المفرخ -->
+    <div id="modalSellEggs" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalSellEggs')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--warning);">🥚 بيع بيض تفريخ</h3>
+            <input type="hidden" id="sellEggsBatchId">
+            <div class="info-box">الدفعة: <strong id="sellEggsBatchName"></strong> | المتاح: <strong id="sellEggsAvail" class="text-primary">0</strong> بيضة</div>
+            <div class="grid-2">
+                <div><label>عدد البيض المباع</label><input type="number" id="sellEggsQty" oninput="calcSellEggsTotal()"></div>
+                <div><label>سعر البيضة (ج.م)</label><input type="number" step="0.25" id="sellEggsUnitPrice" oninput="calcSellEggsTotal()"></div>
+            </div>
+            <div class="info-box" style="text-align:center; margin-top:14px;">
+                <span class="sub-text">إجمالي التحصيل</span>
+                <div id="sellEggsTotalDisplay" style="font-size:26px; font-weight:800; color:var(--success);">0 ج.م</div>
+            </div>
+            <button class="btn btn-success" onclick="confirmSellEggs()">تأكيد بيع البيض</button>
+        </div>
+    </div>
+
+    <!-- تأسيس/تعديل قطيع الأمهات -->
+    <div id="modalFlockUpdate" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalFlockUpdate')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--warning);">🕊️ تأسيس / تعديل قطيع الأمهات</h3>
+            <div class="grid-2">
+                <div><label>عدد الإناث (البياض)</label><input type="number" id="manualFemalesCount" placeholder="750"></div>
+                <div><label>عدد الذكور</label><input type="number" id="manualMalesCount" placeholder="250"></div>
+                <div><label>تاريخ دخول القطيع</label><input type="date" id="flockEntryDateInput"></div>
+                <div><label>عمر القطيع عند الدخول (أسابيع)</label><input type="number" id="flockInitialAgeWeeks" value="6"></div>
+            </div>
+            <label>تكلفة شراء/تجهيز القطيع (اختياري - ج.م)</label>
+            <input type="number" id="flockInitialCost" placeholder="اتركه فارغاً لو تعديل فقط">
+            <button class="btn btn-warning" onclick="updateFlockLedger()">حفظ بيانات القطيع</button>
+        </div>
+    </div>
+
+    <!-- يومية الأمهات (علف + نافق + استبعاد) -->
+    <div id="modalBreederDaily" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalBreederDaily')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--purple);">📋 يومية الأمهات (علف، نافق، استبعاد)</h3>
+            <div class="grid-2">
+                <div><label>نافق إناث</label><input type="number" id="bdDeadFemales" value="0"></div>
+                <div><label>نافق ذكور</label><input type="number" id="bdDeadMales" value="0"></div>
+                <div><label>استبعاد/بيع إناث</label><input type="number" id="bdCulledFemales" value="0"></div>
+                <div><label>استبعاد/بيع ذكور</label><input type="number" id="bdCulledMales" value="0"></div>
+            </div>
+            <div class="grid-2">
+                <div><label>إيراد بيع الاستبعاد (ج.م)</label><input type="number" id="bdCulledRevenue" value="0"></div>
+                <div><label>علف بياض مستهلك (كجم)</label><input type="number" step="0.1" id="bdFeed" value="0"></div>
+            </div>
+            <button class="btn btn-purple" onclick="saveBreederDailyLog()">حفظ يومية الأمهات</button>
+        </div>
+    </div>
+
+    <!-- فرز البيض الذكي -->
+    <div id="modalDailyTriage" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalDailyTriage')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--primary);">🥚 فرز البيض الذكي</h3>
+            <label>نظام التسجيل</label>
+            <select id="triagePeriodMode" onchange="toggleTriagePeriod()">
+                <option value="daily">تسجيل يومي (اليوم فقط)</option>
+                <option value="period">تجميع فترة (عدة أيام)</option>
+            </select>
+            <div id="triagePeriodDates" class="grid-2" style="display:none; margin-top:8px;">
+                <div><label>من يوم</label><input type="date" id="triageStartDate"></div>
+                <div><label>إلى يوم</label><input type="date" id="triageEndDate"></div>
+            </div>
+            <label>إجمالي البيض المجمّع</label>
+            <input type="number" id="triageTotal" value="0">
+            <div class="grid-2">
+                <div><label>بيض مائدة (صالح للبيع)</label><input type="number" id="triageTableEggs" value="0"></div>
+                <div><label>مكسور / معدم</label><input type="number" id="triageBad" value="0"></div>
+            </div>
+            <div class="sub-text" style="margin-top:8px;">* الباقي يُضاف تلقائياً إلى رصيد البيض الصالح للتفريخ.</div>
+            <button class="btn btn-primary" onclick="processTriage()">تحليل وحفظ الفرز</button>
+        </div>
+    </div>
+
+    <!-- تقرير الفرز -->
+    <div id="modalTriageReport" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalTriageReport')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; text-align:center;">📊 التقرير الفني للفرز</h3>
+            <div id="triageReportContent"></div>
+            <button class="btn btn-info" onclick="closeModal('modalTriageReport')">تم الاطلاع 👍</button>
+        </div>
+    </div>
+
+    <!-- بيع بيض المائدة -->
+    <div id="modalSellTableEggs" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalSellTableEggs')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--success);">🥚 بيع بيض المائدة</h3>
+            <div class="info-box">الرصيد المتاح: <strong id="sellTableEggsAvail" class="text-primary">0</strong> بيضة</div>
+            <div class="grid-2">
+                <div><label>العدد المباع</label><input type="number" id="sellTableEggsQty" oninput="calcTableEggsTotal()"></div>
+                <div><label>سعر البيضة (ج.م)</label><input type="number" step="0.25" id="sellTableEggsPrice" oninput="calcTableEggsTotal()"></div>
+            </div>
+            <div class="info-box" style="text-align:center; margin-top:14px;">
+                <span class="sub-text">الإجمالي</span>
+                <div id="sellTableEggsTotalDisplay" style="font-size:26px; font-weight:800; color:var(--success);">0 ج.م</div>
+            </div>
+            <button class="btn btn-success" onclick="confirmSellTableEggs()">تأكيد البيع</button>
+        </div>
+    </div>
+
+    <!-- مستشار الأمهات -->
+    <div id="modalBreederGuide" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalBreederGuide')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--purple);">🧠 مستشار قطيع الأمهات</h3>
+            <div id="breederGuideContent"></div>
+            <button class="btn btn-info" onclick="closeModal('modalBreederGuide')">حسناً 👍</button>
+        </div>
+    </div>
+
+    <!-- تحميل رف المكنة -->
+    <div id="modalShelfSetup" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalShelfSetup')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--info);">تحميل المكنة (ابتداءً من رف <span id="selectedShelfNum"></span>)</h3>
+            <input type="hidden" id="selectedShelfId">
+            <div class="info-box">البيض الجاهز للتفريخ: <strong id="availEggsForShelf" class="text-success">0</strong> بيضة</div>
+            <label>نطاق التحميل</label>
+            <select id="shelfLoadType" onchange="toggleShelfInputs()">
+                <option value="single">هذا الرف فقط</option>
+                <option value="multi">عدة أرفف معاً</option>
+                <option value="full">كل الأرفف الفارغة</option>
+            </select>
+            <div id="multiShelfContainer" style="display:none;">
+                <label>عدد الأرفف المطلوبة</label>
+                <input type="number" id="multiShelfCount" value="2" oninput="calcShelfDist()">
+            </div>
+            <label>إجمالي عدد البيض</label>
+            <input type="number" id="shelfLoadQty" oninput="calcShelfDist()">
+            <div id="shelfDistHint" class="sub-text" style="margin-top:6px;"></div>
+            <label>تاريخ الدخول للماكينة</label>
+            <input type="datetime-local" id="shelfLoadDate">
+            <button class="btn btn-success" onclick="loadIncubatorShelf()">تأكيد التحميل 🚀</button>
+        </div>
+    </div>
+
+    <!-- تصنيف الذبح للفريزر -->
+    <div id="modalClassify" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalClassify')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0;">⚖️ تصنيف الذبح والترحيل للفريزر</h3>
+            <input type="hidden" id="classBatchId">
+            <div class="info-box" style="margin-bottom:10px;">العدد الحي بالدفعة: <strong id="classAliveCount" class="text-primary">0</strong> طائر</div>
+            <div id="classifyInputsGrid" class="grid-2"></div>
+            <label style="color:var(--danger);">هالك / تالف الذبح والتنظيف (بالطائر)</label>
+            <input type="number" min="0" id="c_slaughterLoss" value="0" oninput="updateClassifyCounter()">
+            <div id="classifyMatchStatus" style="margin-top:12px;"></div>
+            <button class="btn btn-success" onclick="finishSlaughter()">تأكيد الترحيل للفريزر ❄️</button>
+        </div>
+    </div>
+
+    <!-- تعديل صنف بالفريزر -->
+    <div id="modalEditFreezerItem" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalEditFreezerItem')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--primary);">✏️ تعديل صنف الفريزر</h3>
+            <input type="hidden" id="editFreezerId">
+            <label>اسم الصنف</label>
+            <input type="text" id="editFreezerName">
+            <div class="grid-3">
+                <div><label>الرصيد الحالي</label><input type="number" id="editFreezerQty"></div>
+                <div><label>السعر (ج.م)</label><input type="number" step="0.5" id="editFreezerPrice"></div>
+                <div><label>طيور/وحدة</label><input type="number" id="editFreezerBpu" value="2"></div>
+            </div>
+            <button class="btn btn-primary" onclick="saveEditFreezerItem()">حفظ التعديلات</button>
+        </div>
+    </div>
+
+    <!-- إدارة أصناف الفريزر -->
+    <div id="modalManageFreezer" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalManageFreezer')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0;">⚙️ إدارة أصناف الفريزر</h3>
+            <div class="info-box" style="margin-bottom:14px;">
+                <h4 style="margin:0 0 8px 0;">إضافة صنف جديد</h4>
+                <label style="margin-top:0;">اسم الصنف</label>
+                <input type="text" id="masterCatName" placeholder="مثال: رويال / طبق متبل">
+                <div class="grid-2">
+                    <div><label>السعر (ج.م)</label><input type="number" id="masterCatPrice" placeholder="120"></div>
+                    <div><label>عدد الطيور بالوحدة</label><input type="number" id="masterCatBpu" value="2"></div>
+                </div>
+                <button class="btn btn-success btn-sm" style="width:100%; margin-top:12px;" onclick="addCategoryFromMaster()">➕ إضافة الصنف</button>
+            </div>
+            <h4 style="margin:0 0 8px 0;">الأصناف الحالية</h4>
+            <div id="freezerCategoriesList" style="max-height:240px; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- فاتورة بيع من الفريزر -->
+    <div id="modalSale" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalSale')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--success);">🛒 فاتورة مبيعات (FIFO)</h3>
+            <label>الصنف</label>
+            <select id="sGrade" onchange="onSaleGradeChange()"></select>
+            <div class="grid-2">
+                <div><label>الكمية المباعة</label><input type="number" id="sQty" oninput="calculateSaleTotal()"></div>
+                <div><label>سعر الوحدة (ج.م)</label><input type="number" step="0.5" id="sUnitPrice" oninput="calculateSaleTotal()"></div>
+            </div>
+            <div class="info-box" style="text-align:center; margin-top:14px;">
+                <span class="sub-text">المطلوب تحصيله</span>
+                <div id="saleTotalDisplay" style="font-size:28px; font-weight:800; color:var(--success);">0 ج.م</div>
+            </div>
+            <button class="btn btn-success" onclick="processSale()">تأكيد البيع</button>
+        </div>
+    </div>
+
+    <!-- توريد علف -->
+    <div id="modalBuyFeed" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalBuyFeed')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--warning);">🌾 توريد علف للمخزن</h3>
+            <div class="grid-2">
+                <div><label>الكمية المشتراة (كجم)</label><input type="number" step="0.5" id="bfQty" placeholder="500" oninput="previewFeedUnitCost()"></div>
+                <div><label>إجمالي الفاتورة (ج.م)</label><input type="number" id="bfTotalCost" placeholder="14500" oninput="previewFeedUnitCost()"></div>
+            </div>
+            <div id="bfUnitPreview" class="sub-text text-primary" style="margin-top:8px; font-weight:700;"></div>
+            <button class="btn btn-warning" onclick="buyFeed()">تأكيد التوريد وتحديث المتوسط</button>
+        </div>
+    </div>
+
+    <!-- تسجيل مصروف أو إيراد -->
+    <div id="modalExpense" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalExpense')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--primary);">💸 تسجيل حركة مالية</h3>
+            <label>نوع الحركة</label>
+            <select id="eTxType">
+                <option value="out">مصروف نقدي (-)</option>
+                <option value="in">إيراد إضافي (+)</option>
+            </select>
+            <label>المبلغ (ج.م)</label>
+            <input type="number" id="eAmount" placeholder="0">
+            <label>البيان / البند</label>
+            <input type="text" id="eType" placeholder="أدوية، كهرباء، نشارة، عمالة...">
+            <label>تحميل على دفعة معينة؟ (للمصروفات المباشرة)</label>
+            <select id="eBatch"><option value="general">مصروف عام</option></select>
+            <button class="btn btn-primary" onclick="saveManualTransaction()">تسجيل الحركة</button>
+        </div>
+    </div>
+
+    <!-- تصفية وأرشفة دفعة -->
+    <div id="modalArchiveBatch" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalArchiveBatch')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--success);">📦 تصفية وأرشفة الدفعة</h3>
+            <input type="hidden" id="archiveBatchId">
+            <div class="info-box" style="margin-bottom:10px;">الدفعة: <strong id="archiveBatchNameDisplay"></strong></div>
+            <label>إجمالي إيراد البيع المباشر (ضع 0 لو تم التصنيف للفريزر مسبقاً)</label>
+            <input type="number" id="archiveRevenue" placeholder="0">
+            <label>ملاحظة التوثيق</label>
+            <input type="text" id="archiveNote" placeholder="بيع جملة / كتاكيت / تصفية">
+            <button class="btn btn-success" onclick="confirmArchiveBatch()">تأكيد التصفية والأرشفة</button>
+        </div>
+    </div>
+
+    <!-- إضافة/تعديل معدة -->
+    <div id="modalManageInventory" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalManageInventory')"><i class="fas fa-times"></i></button>
+            <h3 id="invModalTitle" style="margin-top:0; color:var(--info);">🛠️ إضافة صنف للجرد</h3>
+            <input type="hidden" id="invEditId">
+            <label>اسم المعدة / الأصل</label>
+            <input type="text" id="invItemName" placeholder="أطباق تحضين، سقايات، دفايات...">
+            <div class="grid-2">
+                <div><label>العدد</label><input type="number" id="invItemQty"></div>
+                <div><label>سعر الوحدة (ج.م)</label><input type="number" id="invItemPrice"></div>
+            </div>
+            <button class="btn btn-info" onclick="addOrUpdateInventoryItem()">حفظ في الجرد</button>
+        </div>
+    </div>
+
+    <!-- دليل مهام العامل اليومي -->
+    <div id="modalDailyGuide" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalDailyGuide')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--primary);"><i class="fas fa-clipboard-check"></i> دليل مهام العامل اليومية</h3>
+            <div id="dailyGuideContent"></div>
+            <button class="btn btn-primary" onclick="closeModal('modalDailyGuide')">تم التنفيذ 👍</button>
+        </div>
+    </div>
+
+    <!-- لوحة الأوامر السريعة Ctrl+K -->
+    <div id="commandPalette" class="modal-overlay" style="align-items:flex-start; padding-top:8vh;">
+        <div class="modal-content" style="max-width:560px; padding:0; overflow:hidden; border-radius:18px;">
+            <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px;">
+                <i class="fas fa-search text-primary"></i>
+                <input type="text" id="cmdInput" placeholder="ابحث عن شاشة أو إجراء سريع..." style="border:none; background:transparent; padding:4px; box-shadow:none;">
+                <span class="sub-text" style="border:1px solid var(--border); padding:2px 8px; border-radius:6px;">ESC</span>
+            </div>
+            <div id="cmdResults" style="max-height:360px; overflow-y:auto; padding:8px;"></div>
+        </div>
+    </div>
+
+    <script type="module" src="./js/app.js"></script>
+</body>
+</html>
