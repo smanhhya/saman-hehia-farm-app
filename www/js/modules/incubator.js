@@ -1,13 +1,46 @@
 // www/js/modules/incubator.js
-// إدارة المفرخ وخريطة الأرفف التفاعلية + الربط الثنائي بالدفعات + الدمج الذكي لنفس اليوم
+// إدارة المفرخ وخريطة الأرفف التفاعلية + الربط الثنائي بالدفعات + الترحيل الفوري للـ CRM (عمر يوم)
 
 import { db, ref, set, push, update, remove, atomicAdjust, syncBatchToCRM } from '../config/firebase.js';
 import {
-    state, getBirdStandard, fmtMoney, fmtNum, nowLocalInput, toLocalInput, round2
+    state, getBirdStandard, calcCrmExpectedPairs, fmtMoney, fmtNum, nowLocalInput, toLocalInput, round2
 } from '../core/state.js';
 import { showToast, openModal, closeModal, withActionLock } from '../core/ui.js';
 import { parsePositiveNumber, parseRequiredText, escapeHtml } from '../core/validators.js';
 import { recordCashTransaction } from '../core/accounting.js';
+
+/**
+ * تجهيز بيانات دفعة المفرخ (عمر يوم) للترحيل الفوري للـ CRM
+ * مثال: 600 بيضة بالماكينة -> تظهر في الـ CRM باسم "عمر يوم د/ش" مع عدد البيض والكتاكيت المتوقعة
+ */
+export function buildIncubatorCrmPayload(batch) {
+    const std = getBirdStandard(batch.birdType || 'quail');
+    const hatchDateObj = batch.hatchDate ? new Date(batch.hatchDate) : new Date();
+    const insertDateObj = batch.insertDate ? new Date(batch.insertDate) : new Date();
+    const slAge = Number(batch.slaughterAge) || std.slaughter;
+    const bufferDays = Number(state.settings.crmExtraBufferDays ?? 5);
+    const initialEggs = Math.max(0, Number(batch.initialEggs) || 0);
+    const expectedChicks = Math.floor(initialEggs * 0.75);
+    const expectedPairs = calcCrmExpectedPairs(expectedChicks);
+    const dayOldName = `عمر يوم ${hatchDateObj.getDate()}/${hatchDateObj.getMonth() + 1}`;
+
+    return {
+        name: dayOldName,
+        stage: batch.status || 'incubator',
+        birdType: batch.birdType || 'quail',
+        initialEggs,
+        hatchedChicks: 0,
+        hatchRate: 0,
+        expectedChicks,
+        aliveBirds: 0,
+        expectedPairs,
+        insertDate: insertDateObj.getTime(),
+        hatchDate: hatchDateObj.getTime(),
+        slaughterAge: slAge + bufferDays,
+        isOpen: true,
+        isVisible: true
+    };
+}
 
 export function renderIncubatorGrid() {
     const grid = document.getElementById('incubatorGrid');
@@ -169,7 +202,6 @@ export async function loadIncubatorShelf() {
             return showToast(`الأرفف الفارغة المتاحة (${emptyShelves.length}) أقل من المطلوب (${targetCount})`, true);
         }
 
-        // الدمج الذكي: لو توجد دفعة سمان بالماكينة دخلت في نفس اليوم، ندمج الأرفف معها
         const dateOnly = dateStr.split('T')[0];
         let existingBatchId = null;
         for (const [bId, b] of Object.entries(state.batches)) {
@@ -196,8 +228,14 @@ export async function loadIncubatorShelf() {
         await update(ref(db, 'incubatorGrid'), gridUpdates);
 
         if (existingBatchId) {
-            await atomicAdjust(`batches/${existingBatchId}/initialEggs`, totalEggs, { allowNegative: false, decimals: 0 });
-            showToast(`تم التحميل والدمج الذكي مع دفعة يوم ${dateOnly} 🚀`);
+            const newTotalEggs = await atomicAdjust(`batches/${existingBatchId}/initialEggs`, totalEggs, { allowNegative: false, decimals: 0 });
+            const mergedBatch = { ...state.batches[existingBatchId], initialEggs: newTotalEggs };
+            try {
+                await syncBatchToCRM(existingBatchId, buildIncubatorCrmPayload(mergedBatch), false);
+            } catch (err) {
+                console.warn('CRM merge sync skipped:', err);
+            }
+            showToast(`تم التحميل والدمج الذكي وتحديث الـ CRM لدفعة يوم ${dateOnly} 🚀`);
         } else {
             const std = getBirdStandard('quail');
             const insertD = new Date(dateStr);
@@ -205,7 +243,7 @@ export async function loadIncubatorShelf() {
             const hatchD = new Date(insertD.getTime() + std.hatch * 86400000);
             const rearD = new Date(hatchD.getTime() + std.slaughter * 86400000);
 
-            await set(ref(db, `batches/${batchIdToUse}`), {
+            const batchObj = {
                 name: `دفعة ${dateOnly}`,
                 birdType: 'quail',
                 insertDate: dateStr,
@@ -218,12 +256,20 @@ export async function loadIncubatorShelf() {
                 totalDead: 0,
                 totalFeed: 0,
                 order: Date.now()
-            });
-            showToast(`تم إدخال الدفعة وتوزيعها على ${targetCount} أرفف 🚀`);
+            };
+
+            await set(ref(db, `batches/${batchIdToUse}`), batchObj);
+
+            try {
+                await syncBatchToCRM(batchIdToUse, buildIncubatorCrmPayload(batchObj), true);
+            } catch (err) {
+                console.warn('CRM incubator create skipped:', err);
+            }
+            showToast(`تم إدخال الدفعة على ${targetCount} أرفف وترحيلها للـ CRM (عمر يوم) 🚀`);
         }
 
         closeModal('modalShelfSetup');
-    }, 'جاري تحميل الأرفف...');
+    }, 'جاري تحميل الأرفف والترحيل للـ CRM...');
 }
 
 export async function emptyShelf(shelfNum) {
@@ -240,6 +286,12 @@ export async function emptyShelf(shelfNum) {
                 const curEggs = Number(state.batches[shelf.batchId].initialEggs) || 0;
                 const nextEggs = Math.max(0, curEggs - (Number(shelf.qty) || 0));
                 await update(ref(db, `batches/${shelf.batchId}`), { initialEggs: nextEggs });
+                try {
+                    const updatedBatch = { ...state.batches[shelf.batchId], initialEggs: nextEggs };
+                    await syncBatchToCRM(shelf.batchId, buildIncubatorCrmPayload(updatedBatch), false);
+                } catch (err) {
+                    console.warn('CRM shelf deduct sync skipped:', err);
+                }
             }
         }
         showToast(`تم تفريغ الرف ${shelfNum} بنجاح`);
@@ -314,7 +366,7 @@ export async function saveNewBatch() {
         }
 
         const newRef = push(ref(db, 'batches'));
-        await set(newRef, {
+        const batchObj = {
             name,
             birdType: bType,
             insertDate: datetimeStr,
@@ -327,11 +379,21 @@ export async function saveNewBatch() {
             totalDead: 0,
             totalFeed: 0,
             order: Date.now()
-        });
+        };
+
+        await set(newRef, batchObj);
+
+        let crmNote = ' وترحيلها للـ CRM (عمر يوم)';
+        try {
+            await syncBatchToCRM(newRef.key, buildIncubatorCrmPayload(batchObj), true);
+        } catch (err) {
+            console.warn('CRM new batch sync skipped:', err);
+            crmNote = ' (تعذر الترحيل للـ CRM حالياً)';
+        }
 
         closeModal('modalBatch');
-        showToast(`تمت إضافة "${name}" بالمفرخ بنجاح 🥚`);
-    }, 'جاري حفظ الدفعة...');
+        showToast(`تمت إضافة "${name}" بالمفرخ${crmNote} 🥚`);
+    }, 'جاري حفظ الدفعة والترحيل للـ CRM...');
 }
 
 export function openEditBatch(id) {
@@ -411,25 +473,36 @@ export async function saveEditBatch() {
             if (b.initialEggs > 0) {
                 updateData.hatchRate = Number(((newQty / b.initialEggs) * 100).toFixed(1));
             }
+            const alive = Math.max(0, newQty - (Number(b.totalDead) || 0));
+            updateData.crmExpectedPairs = calcCrmExpectedPairs(alive);
         }
 
         await update(ref(db, `batches/${id}`), updateData);
 
-        // تحديث آمن في الـ CRM لو الدفعة في التربية (بدون المساس بحجوزات العملاء)
-        if (b.status === 'rearing') {
-            try {
+        try {
+            if (b.status === 'incubator' || b.status === 'hatcher') {
+                await syncBatchToCRM(id, buildIncubatorCrmPayload({ ...b, ...updateData }), false);
+            } else if (b.status === 'rearing') {
                 const bufferDays = Number(state.settings.crmExtraBufferDays ?? 5);
+                const alive = Math.max(0, newQty - (Number(b.totalDead) || 0));
                 await syncBatchToCRM(id, {
                     name: newName,
+                    stage: 'rearing',
+                    initialEggs: Number(b.initialEggs) || 0,
+                    hatchedChicks: newQty,
+                    hatchRate: updateData.hatchRate ?? (b.hatchRate || 0),
+                    aliveBirds: alive,
+                    expectedPairs: calcCrmExpectedPairs(alive),
+                    hatchDate: new Date(newDateStr).getTime(),
                     slaughterAge: (updateData.slaughterAge || std.slaughter) + bufferDays
                 }, false);
-            } catch (e) {
-                console.warn('CRM name/date patch skipped:', e);
             }
+        } catch (e) {
+            console.warn('CRM edit sync skipped:', e);
         }
 
         closeModal('modalEditBatch');
-        showToast('تم حفظ تعديلات الدفعة بنجاح ✏️');
+        showToast('تم حفظ تعديلات الدفعة وتحديث الـ CRM ✏️');
     }, 'جاري حفظ التعديلات...');
 }
 
@@ -440,9 +513,13 @@ export async function updateStage(id, newStage) {
 
     await withActionLock(`stage_${id}`, async () => {
         await update(ref(db, `batches/${id}`), { status: newStage });
-        // عند النقل من التحضين إلى المفقس، نفرّغ أرفف التحضين المرتبطة أوتوماتيكياً لمنع الأرفف الشبحية
         if (newStage === 'hatcher') {
             await clearShelvesForBatch(id);
+        }
+        try {
+            await syncBatchToCRM(id, { stage: newStage }, false);
+        } catch (err) {
+            console.warn('CRM stage patch skipped:', err);
         }
         showToast('تم تحديث مرحلة الدفعة بنجاح');
     });
@@ -456,6 +533,11 @@ export async function deleteBatch(id) {
     await withActionLock(`delBatch_${id}`, async () => {
         await clearShelvesForBatch(id);
         await remove(ref(db, `batches/${id}`));
+        try {
+            await syncBatchToCRM(id, { isOpen: false, isVisible: false, stage: 'deleted' }, false);
+        } catch (err) {
+            console.warn('CRM delete hide skipped:', err);
+        }
         showToast('تم حذف الدفعة وتنظيف أرففها المرتبطة');
     });
 }
@@ -499,7 +581,7 @@ export async function confirmSellEggs() {
         }
 
         const total = round2(qty * unitPrice);
-        await atomicAdjust(`batches/${batchId}/initialEggs`, -qty, { allowNegative: false, decimals: 0 });
+        const remainingEggs = await atomicAdjust(`batches/${batchId}/initialEggs`, -qty, { allowNegative: false, decimals: 0 });
         await recordCashTransaction({
             type: 'in',
             amount: total,
@@ -507,6 +589,12 @@ export async function confirmSellEggs() {
             batchId,
             category: 'hatching_eggs_sale'
         });
+
+        try {
+            await syncBatchToCRM(batchId, buildIncubatorCrmPayload({ ...b, initialEggs: remainingEggs }), false);
+        } catch (err) {
+            console.warn('CRM egg sale sync skipped:', err);
+        }
 
         closeModal('modalSellEggs');
         showToast(`تم بيع ${qty} بيضة بإيراد ${fmtMoney(total)} ج.م 🥚`);
