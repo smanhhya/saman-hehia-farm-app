@@ -1263,3 +1263,57 @@ input:focus, select:focus {
 .text-danger { color: var(--danger) !important; }
 .text-warning { color: var(--warning) !important; }
 .text-info { color: var(--info) !important; }
+
+/* ================= تحديث التطبيق + الأمهات Pro ================= */
+.update-banner {
+    background: linear-gradient(135deg, var(--primary), #0284c7);
+    color: #fff;
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    box-shadow: var(--shadow-md);
+}
+.flock-pro-card {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-right: 5px solid var(--primary);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    margin-bottom: 12px;
+}
+.prod-chart-wrap {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 135px;
+    padding: 16px 4px 4px;
+    overflow-x: auto;
+}
+.prod-bar-col {
+    flex: 1;
+    min-width: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    justify-content: flex-end;
+    gap: 4px;
+}
+.prod-bar-val { font-size: 10px; font-weight: 800; color: var(--text-primary); }
+.prod-bar-track {
+    width: 100%;
+    max-width: 24px;
+    flex: 1;
+    background: var(--border);
+    border-radius: 6px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+}
+.prod-bar-fill { width: 100%; border-radius: 6px; transition: height 0.4s ease; }
+.prod-bar-date { font-size: 9px; color: var(--text-secondary); font-weight: 700; }
+.b-log-tab.active { background: var(--primary) !important; color: #fff !important; border-color: var(--primary) !important; }
