@@ -43,6 +43,7 @@
         </div>
         <div class="topbar-actions">
             <span class="conn-pill"><span id="connStatusDot" class="conn-dot"></span><span id="connStatusText">جاري الاتصال</span></span>
+            <button class="icon-circle-btn" id="topUpdateBtn" onclick="checkForAppUpdate(true)" title="تحديث التطبيق"><i class="fas fa-arrows-rotate"></i></button>
             <button class="icon-circle-btn" onclick="openCommandPalette()" title="بحث سريع"><i class="fas fa-search"></i></button>
             <button class="icon-circle-btn" onclick="toggleAppTheme()" title="الوضع الليلي"><i id="themeIcon" class="fas fa-moon"></i></button>
         </div>
@@ -67,6 +68,7 @@
         <div class="nav-item" data-page="reports" onclick="switchPage('reports')"><i class="fas fa-chart-line"></i><span>تقارير الربحية P&L</span></div>
         <div class="nav-item" data-page="inventory" onclick="switchPage('inventory')"><i class="fas fa-boxes"></i><span>جرد المعدات</span></div>
         <div style="flex:1;"></div>
+        <div class="nav-item" onclick="checkForAppUpdate(true)"><i class="fas fa-arrows-rotate"></i><span>تحديث التطبيق</span></div>
         <div class="nav-item" onclick="openCommandPalette()"><i class="fas fa-magnifying-glass"></i><span>بحث سريع (Ctrl+K)</span></div>
         <div class="nav-item" data-page="settingsPage" onclick="switchPage('settingsPage')"><i class="fas fa-sliders-h"></i><span>مركز الإعدادات</span></div>
     </aside>
@@ -94,6 +96,15 @@
 
     <!-- المحتوى الرئيسي -->
     <main class="main-content">
+
+        <!-- شريط التحديث التلقائي -->
+        <div id="updateAvailableBanner" class="update-banner" style="display:none;">
+            <div>
+                <strong>🚀 يتوفر تحديث جديد للتطبيق!</strong>
+                <div class="sub-text" id="updateBannerSub" style="color:rgba(255,255,255,0.9);">اضغط تحديث لتحميل أحدث المزايا والإصلاحات.</div>
+            </div>
+            <button class="btn btn-sm" style="background:#fff; color:var(--primary);" onclick="applyAppUpdate()"><i class="fas fa-download"></i> تحديث الآن</button>
+        </div>
 
         <!-- ================= 1. لوحة القيادة ================= -->
         <section id="dashboard" class="page-view active">
@@ -147,37 +158,65 @@
             </div>
         </section>
 
-        <!-- ================= 2. قطيع الأمهات والمفرخ التفاعلي ================= -->
+        <!-- ================= 2. قطيع الأمهات والمفرخ التفاعلي (Pro) ================= -->
         <section id="breeders" class="page-view">
             <div class="header-title">
-                <h1><i class="fas fa-venus-mars text-primary"></i> قطيع الأمهات والمفرخ</h1>
+                <h1><i class="fas fa-venus-mars text-primary"></i> إدارة قطيع الأمهات (Pro)</h1>
                 <div class="header-actions">
-                    <button class="btn btn-warning btn-sm" onclick="openFlockSetupModal()"><i class="fas fa-gear"></i> تأسيس/تعديل القطيع</button>
-                    <button class="btn btn-purple btn-sm" onclick="openBreederDailyModal()"><i class="fas fa-clipboard-list"></i> يومية الأمهات</button>
+                    <button class="btn btn-primary btn-sm" onclick="openFlockModal()"><i class="fas fa-plus"></i> قطيع جديد</button>
+                    <button class="btn btn-info btn-sm" onclick="openPromoteRearingModal()"><i class="fas fa-right-left"></i> إحلال من التربية</button>
+                    <button class="btn btn-purple btn-sm" onclick="openBreederDailyModal()"><i class="fas fa-clipboard-list"></i> يومية</button>
                 </div>
             </div>
 
+            <!-- لوحة الأرصدة والتحكم الحر -->
             <div class="card" style="border-right:4px solid var(--info);">
                 <div class="card-header">
-                    <span>حالة قطيع الأمهات</span>
+                    <span><i class="fas fa-chart-pie"></i> ملخص الأمهات ومخزون البيض</span>
                     <span id="fertilityBadge" class="badge" style="background:var(--success);">إخصاب متوقع: 0%</span>
                 </div>
                 <div class="grid-auto">
-                    <div class="stat-box">إجمالي القطيع<span class="num text-info" id="activeMothersCount">0</span></div>
+                    <div class="stat-box">إجمالي الأمهات<span class="num text-info" id="activeMothersCount">0</span></div>
                     <div class="stat-box" style="border-color:#ec4899;">إناث (بياض)<span class="num" style="color:#ec4899;" id="activeFemalesCount">0</span></div>
                     <div class="stat-box" style="border-color:#0ea5e9;">ذكور (تلقيح)<span class="num" style="color:#0ea5e9;" id="activeMalesCount">0</span></div>
-                    <div class="stat-box">العمر الحقيقي<span class="num text-warning" id="flockAgeDisplay">0</span><span class="sub-text">أسبوع</span></div>
-                    <div class="stat-box" style="border-color:var(--success);">بيض للتفريخ<span class="num text-success" id="readyEggsCount">0</span></div>
+                    <div class="stat-box">متوسط العمر<span class="num text-warning" id="flockAgeDisplay">0</span><span class="sub-text">أسبوع</span></div>
+                    <div class="stat-box clickable" onclick="openEggControlModal()" style="border-color:var(--success);">بيض للتفريخ ✏️<span class="num text-success" id="readyEggsCount">0</span></div>
                     <div class="stat-box clickable" onclick="openSellTableEggsModal()" style="border-color:var(--purple);">بيض مائدة (للبيع)<span class="num" style="color:var(--purple);" id="tableEggsCount">0</span></div>
                 </div>
 
-                <div class="grid-3" style="margin-top:14px;">
-                    <button class="btn btn-primary btn-sm" style="width:100%; padding:11px;" onclick="openTriageModal()"><i class="fas fa-egg"></i> فرز البيض الذكي</button>
-                    <button class="btn btn-success btn-sm" style="width:100%; padding:11px;" onclick="openSellTableEggsModal()"><i class="fas fa-coins"></i> بيع بيض مائدة</button>
-                    <button class="btn btn-purple btn-sm" style="width:100%; padding:11px;" onclick="openBreederGuide()"><i class="fas fa-brain"></i> مستشار الأمهات</button>
+                <div class="grid-4" style="margin-top:14px;">
+                    <button class="btn btn-primary btn-sm" style="width:100%; padding:10px;" onclick="openTriageModal()"><i class="fas fa-egg"></i> فرز بيض</button>
+                    <button class="btn btn-info btn-sm" style="width:100%; padding:10px;" onclick="openEggControlModal()"><i class="fas fa-sliders"></i> تحكم بالبيض</button>
+                    <button class="btn btn-warning btn-sm" style="width:100%; padding:10px;" onclick="openBreederExpenseModal()"><i class="fas fa-pills"></i> فيتامين/مصروف</button>
+                    <button class="btn btn-purple btn-sm" style="width:100%; padding:10px;" onclick="openBreederGuide()"><i class="fas fa-brain"></i> المستشار</button>
                 </div>
             </div>
 
+            <!-- لوحة التحليلات وتكلفة البيضة وحاسبة المكنة -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-microchip text-primary"></i> تحليلات الأمهات وحاسبة ملء المكنة</div>
+                <div id="breedersIntelPanel"></div>
+            </div>
+
+            <!-- قطعان وعنابر الأمهات (تعدد القطعان) -->
+            <div class="card">
+                <div class="card-header">
+                    <span><i class="fas fa-layer-group text-info"></i> قطعان وعنابر الأمهات</span>
+                    <button class="btn btn-ghost btn-sm" onclick="openFlockModal()"><i class="fas fa-plus"></i> إضافة قطيع</button>
+                </div>
+                <div id="flocksListContainer"></div>
+            </div>
+
+            <!-- رسم بياني حي لآخر 14 سجل إنتاج -->
+            <div class="card">
+                <div class="card-header">
+                    <span><i class="fas fa-chart-column text-success"></i> منحنى إنتاج البيض (آخر 14 سجل)</span>
+                    <span class="sub-text">أخضر ≥75% • أصفر ≥60% • أحمر &lt;60%</span>
+                </div>
+                <div id="breedersProdChart"></div>
+            </div>
+
+            <!-- خريطة مكنة التفريخ التفاعلية -->
             <div class="card">
                 <div class="card-header">
                     <span><i class="fas fa-server"></i> خريطة مكنة التفريخ التفاعلية</span>
@@ -186,8 +225,15 @@
                 <div id="incubatorGrid" class="shelf-grid"></div>
             </div>
 
+            <!-- سجل حركات الأمهات مع إمكانية الحذف وعكس الأثر -->
             <div class="card">
-                <div class="card-header"><i class="fas fa-clock-rotate-left"></i> أحدث سجلات فرز البيض</div>
+                <div class="card-header">
+                    <span><i class="fas fa-clock-rotate-left"></i> سجل حركات الأمهات (قابل للعكس والحذف)</span>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-ghost btn-sm b-log-tab active" data-log-tab="triage" onclick="switchBreedersLogTab('triage')">فرز البيض</button>
+                        <button class="btn btn-ghost btn-sm b-log-tab" data-log-tab="history" onclick="switchBreedersLogTab('history')">اليوميات والنافق</button>
+                    </div>
+                </div>
                 <div id="breedersRecentLogs"></div>
             </div>
         </section>
@@ -346,7 +392,7 @@
                     <div class="settings-nav-item active" onclick="switchSettingsTab('general', this)"><i class="fas fa-globe"></i> عام والمظهر</div>
                     <div class="settings-nav-item" onclick="switchSettingsTab('farmOps', this)"><i class="fas fa-tractor"></i> التسعير والتشغيل</div>
                     <div class="settings-nav-item" onclick="switchSettingsTab('incCrm', this)"><i class="fas fa-server"></i> المكنة وربط CRM</div>
-                    <div class="settings-nav-item" onclick="switchSettingsTab('backup', this)"><i class="fas fa-cloud-arrow-down"></i> النسخ الاحتياطي</div>
+                    <div class="settings-nav-item" onclick="switchSettingsTab('backup', this)"><i class="fas fa-cloud-arrow-down"></i> التحديث والنسخ الاحتياطي</div>
                 </div>
 
                 <div class="settings-content-area">
@@ -459,14 +505,23 @@
                                 <div><label>نسبة أمان النافق للـ CRM (%)</label><input type="number" id="setCrmSafetyMargin"></div>
                                 <div><label>أيام أمان إضافية للعميل (يوم)</label><input type="number" id="setCrmExtraDays"></div>
                             </div>
-                            <button class="btn btn-info btn-sm" style="margin-top:12px;" onclick="syncLegacyBatchesToCRM()"><i class="fas fa-rotate"></i> مزامنة دفعات التربية مع الـ CRM الآن</button>
+                            <button class="btn btn-info btn-sm" style="margin-top:12px;" onclick="syncLegacyBatchesToCRM()"><i class="fas fa-rotate"></i> مزامنة الدفعات مع الـ CRM الآن</button>
                         </div>
 
                         <button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ إعدادات المكنة والـ CRM</button>
                     </div>
 
-                    <!-- تبويب النسخ الاحتياطي -->
+                    <!-- تبويب التحديث والنسخ الاحتياطي -->
                     <div id="tab-backup" class="settings-tab">
+                        <div class="settings-card" style="border-color:var(--primary);">
+                            <h3 style="margin-top:0; color:var(--primary);">🚀 تحديث التطبيق التلقائي</h3>
+                            <p class="sub-text">الإصدار المثبت حالياً: <strong id="appVersionBadge" class="text-primary">جاري الفحص...</strong></p>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                                <button class="btn btn-primary btn-sm" onclick="checkForAppUpdate(true)"><i class="fas fa-arrows-rotate"></i> فحص وتحديث التطبيق الآن</button>
+                                <button class="btn btn-ghost btn-sm" onclick="forceReloadApp()"><i class="fas fa-broom"></i> تحديث فوري ومسح الكاش</button>
+                            </div>
+                        </div>
+
                         <div class="settings-card">
                             <h3 style="margin-top:0;">📥 النسخ الاحتياطي والاستعادة (JSON)</h3>
                             <p class="sub-text">احتفظ بنسخة كاملة من قاعدة بيانات المزرعة على جهازك ويمكنك استعادتها في أي وقت.</p>
@@ -629,20 +684,99 @@
         </div>
     </div>
 
-    <!-- تأسيس/تعديل قطيع الأمهات -->
+    <!-- إضافة / تعديل قطيع أمهات -->
     <div id="modalFlockUpdate" class="modal-overlay">
         <div class="modal-content">
             <button class="close-modal" onclick="closeModal('modalFlockUpdate')"><i class="fas fa-times"></i></button>
-            <h3 style="margin-top:0; color:var(--warning);">🕊️ تأسيس / تعديل قطيع الأمهات</h3>
+            <h3 id="flockModalTitle" style="margin-top:0; color:var(--warning);">🕊️ إضافة / تعديل قطيع أمهات</h3>
+            <input type="hidden" id="flockEditId">
+            <label>اسم القطيع / البطارية</label>
+            <input type="text" id="flockNameInput" placeholder="مثال: القطيع الأساسي - بطارية 1">
             <div class="grid-2">
+                <div><label>المكان / العنبر</label><input type="text" id="flockLocationInput" placeholder="بطارية 1"></div>
+                <div><label>السلالة / النوع</label><input type="text" id="flockBreedInput" placeholder="سمان ياباني / جامبو"></div>
                 <div><label>عدد الإناث (البياض)</label><input type="number" id="manualFemalesCount" placeholder="750"></div>
-                <div><label>عدد الذكور</label><input type="number" id="manualMalesCount" placeholder="250"></div>
-                <div><label>تاريخ دخول القطيع</label><input type="date" id="flockEntryDateInput"></div>
-                <div><label>عمر القطيع عند الدخول (أسابيع)</label><input type="number" id="flockInitialAgeWeeks" value="6"></div>
+                <div><label>عدد الذكور (التلقيح)</label><input type="number" id="manualMalesCount" placeholder="250"></div>
+                <div><label>تاريخ الدخول</label><input type="date" id="flockEntryDateInput"></div>
+                <div><label>العمر عند الدخول (أسابيع)</label><input type="number" id="flockInitialAgeWeeks" value="6"></div>
             </div>
-            <label>تكلفة شراء/تجهيز القطيع (اختياري - ج.م)</label>
+            <label>تكلفة الشراء/التجهيز (اختياري - ج.م)</label>
             <input type="number" id="flockInitialCost" placeholder="اتركه فارغاً لو تعديل فقط">
+            <label>ملاحظات (اختياري)</label>
+            <input type="text" id="flockNotesInput" placeholder="مصدر القطيع أو حالة صحية...">
             <button class="btn btn-warning" onclick="updateFlockLedger()">حفظ بيانات القطيع</button>
+        </div>
+    </div>
+
+    <!-- تحويل دفعة تربية إلى أمهات إحلال -->
+    <div id="modalPromoteToBreeder" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalPromoteToBreeder')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--info);">🔄 تحويل من عنبر التربية إلى أمهات إحلال</h3>
+            <label>اختر دفعة التربية المصدر</label>
+            <select id="promoteBatchSelect"></select>
+            <label>اسم قطيع الإحلال الجديد</label>
+            <input type="text" id="promoteFlockName" placeholder="قطيع إحلال شباب">
+            <div class="grid-2">
+                <div><label>عدد الإناث المحوّلة</label><input type="number" id="promoteFemales" placeholder="300"></div>
+                <div><label>عدد الذكور المحوّلة</label><input type="number" id="promoteMales" placeholder="100"></div>
+            </div>
+            <div class="sub-text" style="margin-top:8px;">* سيتم خصم الطيور المحوّلة تلقائياً من دفعة التربية ونقلها بعمرها الفعلي إلى قطيع الأمهات.</div>
+            <button class="btn btn-info" onclick="confirmPromoteToBreeder()">تأكيد التحويل إلى أمهات 🚀</button>
+        </div>
+    </div>
+
+    <!-- تصفية / بيع قطيع أمهات كامل -->
+    <div id="modalLiquidateFlock" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalLiquidateFlock')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--success);">💰 تصفية / بيع قطيع أمهات</h3>
+            <input type="hidden" id="liqFlockId">
+            <div class="info-box" id="liqFlockInfo" style="margin-bottom:10px; font-weight:700;"></div>
+            <label>إجمالي إيراد البيع (ج.م)</label>
+            <input type="number" id="liqFlockRevenue" placeholder="مثال: 12000">
+            <button class="btn btn-success" onclick="confirmLiquidateFlock()">تأكيد التصفية وإضافة الإيراد</button>
+        </div>
+    </div>
+
+    <!-- التحكم الحر في مخزون البيض -->
+    <div id="modalEggControl" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalEggControl')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--info);">🎛️ التحكم الحر في مخزون البيض</h3>
+            <div class="grid-2" style="margin-bottom:10px;">
+                <div class="mini-kpi"><span>بيض التفريخ</span><strong class="text-success" id="ecReadyNow">0</strong></div>
+                <div class="mini-kpi"><span>بيض المائدة</span><strong style="color:var(--purple);" id="ecTableNow">0</strong></div>
+            </div>
+            <label>اختر الإجراء</label>
+            <select id="ecActionType" onchange="toggleEggControlFields()">
+                <option value="ready_to_table">تحويل من بيض تفريخ ⬅️ بيض مائدة</option>
+                <option value="table_to_ready">تحويل من بيض مائدة ⬅️ بيض تفريخ</option>
+                <option value="buy_hatching">شراء بيض تفريخ خارجي (+ إضافة للرصيد)</option>
+                <option value="set_ready">تعديل جرد بيض التفريخ يدوياً</option>
+                <option value="set_table">تعديل جرد بيض المائدة يدوياً</option>
+            </select>
+            <label>العدد (بيضة)</label>
+            <input type="number" id="ecQty" placeholder="مثال: 200">
+            <div id="ecCostWrap" style="display:none;">
+                <label>إجمالي تكلفة الشراء (ج.م - يُسجل كمصروف)</label>
+                <input type="number" id="ecCost" placeholder="0">
+            </div>
+            <button class="btn btn-info" onclick="confirmEggControlAction()">تنفيذ الإجراء ✅</button>
+        </div>
+    </div>
+
+    <!-- مصروف رعاية وفيتامينات الأمهات -->
+    <div id="modalBreederExpense" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal('modalBreederExpense')"><i class="fas fa-times"></i></button>
+            <h3 style="margin-top:0; color:var(--warning);">💊 مصروف رعاية وفيتامينات الأمهات</h3>
+            <label>المبلغ (ج.م)</label>
+            <input type="number" id="beAmount" placeholder="مثال: 250">
+            <label>البيان</label>
+            <input type="text" id="beDesc" placeholder="كالسيوم، AD3E، هـ سيلينيوم، تحصين...">
+            <div class="sub-text" style="margin-top:8px;">* يُسجل في المصروفات ويُحتسب تلقائياً ضمن تكلفة إنتاج البيضة الواحدة.</div>
+            <button class="btn btn-warning" onclick="saveBreederExpense()">حفظ المصروف</button>
         </div>
     </div>
 
@@ -651,6 +785,8 @@
         <div class="modal-content">
             <button class="close-modal" onclick="closeModal('modalBreederDaily')"><i class="fas fa-times"></i></button>
             <h3 style="margin-top:0; color:var(--purple);">📋 يومية الأمهات (علف، نافق، استبعاد)</h3>
+            <label>اختر القطيع</label>
+            <select id="bdFlockSelect"></select>
             <div class="grid-2">
                 <div><label>نافق إناث</label><input type="number" id="bdDeadFemales" value="0"></div>
                 <div><label>نافق ذكور</label><input type="number" id="bdDeadMales" value="0"></div>
@@ -670,6 +806,8 @@
         <div class="modal-content">
             <button class="close-modal" onclick="closeModal('modalDailyTriage')"><i class="fas fa-times"></i></button>
             <h3 style="margin-top:0; color:var(--primary);">🥚 فرز البيض الذكي</h3>
+            <label>القطيع المصدر</label>
+            <select id="triageFlockSelect"></select>
             <label>نظام التسجيل</label>
             <select id="triagePeriodMode" onchange="toggleTriagePeriod()">
                 <option value="daily">تسجيل يومي (اليوم فقط)</option>
