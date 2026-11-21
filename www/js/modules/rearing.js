@@ -1,4 +1,3 @@
-
 // www/js/modules/rearing.js
 // إدارة الفقس، عنابر التربية، اليوميات (علف/نافق)، دليل العامل الذكي، والمزامنة الكاملة مع الـ CRM
 
@@ -77,7 +76,11 @@ export async function moveToRearing() {
         const finalName = customName || `تربية ${slaughterDateObj.getDate()}/${slaughterDateObj.getMonth() + 1}`;
         const hatchRate = initialEggs > 0 ? Number(((healthy / initialEggs) * 100).toFixed(1)) : 0;
         const expectedPairs = calcCrmExpectedPairs(healthy);
-        const bufferDays = Number(state.settings.crmExtraBufferDays ?? 5);
+        const isQuailBatch = (b.birdType || 'quail') === 'quail';
+        const safeMinAge = isQuailBatch ? Math.max(38, slAge) : slAge;
+        const safeMaxAge = isQuailBatch ? Math.max(safeMinAge + 7, 45) : (slAge + Number(state.settings.crmExtraBufferDays ?? 5));
+        const safeDeliveryStartISO = new Date(hatchDateObj.getTime() + safeMinAge * 86400000).toISOString().split('T')[0];
+        const safeDeliveryEndISO = new Date(hatchDateObj.getTime() + safeMaxAge * 86400000).toISOString().split('T')[0];
 
         await update(ref(db, `batches/${id}`), {
             name: finalName,
@@ -127,7 +130,11 @@ export async function moveToRearing() {
                 expectedChicks: healthy,
                 expectedPairs,
                 hatchDate: hatchDateObj.getTime(),
-                slaughterAge: slAge + bufferDays,
+                slaughterAgeMin: safeMinAge,
+                slaughterAgeMax: safeMaxAge,
+                slaughterAge: safeMaxAge,
+                deliveryStart: safeDeliveryStartISO,
+                deliveryEnd: safeDeliveryEndISO,
                 isOpen: false,
                 isVisible: false,
                 pendingApproval: true,
@@ -253,6 +260,11 @@ export async function syncLegacyBatchesToCRM() {
                 const slAge = b.slaughterAge || getBirdStandard(b.birdType || 'quail').slaughter;
                 const hatchRate = b.hatchRate ?? (initialEggs > 0 ? Number(((hatched / initialEggs) * 100).toFixed(1)) : 0);
                 const targetTrack = (b.birdType === 'chicken' || b.birdType === 'turkey') ? 'weight' : 'quail';
+                const isQuailBatch = (b.birdType || 'quail') === 'quail';
+                const safeMinAge = isQuailBatch ? Math.max(38, slAge) : slAge;
+                const safeMaxAge = isQuailBatch ? Math.max(safeMinAge + 7, 45) : (slAge + bufferDays);
+                const safeDeliveryStartISO = new Date(hatchDateObj.getTime() + safeMinAge * 86400000).toISOString().split('T')[0];
+                const safeDeliveryEndISO = new Date(hatchDateObj.getTime() + safeMaxAge * 86400000).toISOString().split('T')[0];
 
                 const rearPayload = {
                     name: b.name,
@@ -268,12 +280,16 @@ export async function syncLegacyBatchesToCRM() {
                     expectedChicks: hatched,
                     expectedPairs,
                     hatchDate: hatchDateObj.getTime(),
-                    slaughterAge: slAge + bufferDays,
+                    slaughterAgeMin: safeMinAge,
+                    slaughterAgeMax: safeMaxAge,
+                    slaughterAge: safeMaxAge,
                     fromFarm: true,
                     farmSyncedAt: Date.now()
                 };
 
                 if (!existsInCRM) {
+                    rearPayload.deliveryStart = safeDeliveryStartISO;
+                    rearPayload.deliveryEnd = safeDeliveryEndISO;
                     rearPayload.isOpen = false;
                     rearPayload.isVisible = false;
                     rearPayload.pendingApproval = true;
