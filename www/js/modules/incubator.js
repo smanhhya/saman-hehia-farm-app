@@ -1,5 +1,4 @@
 // www/js/modules/incubator.js
-
 // إدارة المفرخ وخريطة الأرفف التفاعلية + الربط الثنائي بالدفعات + الترحيل الفوري للـ CRM (عمر يوم)
 
 import { db, ref, set, push, update, remove, atomicAdjust, syncBatchToCRM } from '../config/firebase.js';
@@ -14,7 +13,7 @@ import { recordCashTransaction } from '../core/accounting.js';
  * تجهيز بيانات دفعة المفرخ (عمر يوم) للترحيل الفوري للـ CRM
  * مثال: 600 بيضة بالماكينة -> تظهر في الـ CRM باسم "عمر يوم د/ش" مع عدد البيض والكتاكيت المتوقعة
  */
-export function buildIncubatorCrmPayload(batch) {
+export function buildIncubatorCrmPayload(batch, isNewForCrm = false) {
     const std = getBirdStandard(batch.birdType || 'quail');
     const hatchDateObj = batch.hatchDate ? new Date(batch.hatchDate) : new Date();
     const insertDateObj = batch.insertDate ? new Date(batch.insertDate) : new Date();
@@ -25,8 +24,9 @@ export function buildIncubatorCrmPayload(batch) {
     const expectedPairs = calcCrmExpectedPairs(expectedChicks);
     const dayOldName = `عمر يوم ${hatchDateObj.getDate()}/${hatchDateObj.getMonth() + 1}`;
 
-    return {
+    const payload = {
         name: dayOldName,
+        batchType: 'chicks',
         stage: batch.status || 'incubator',
         birdType: batch.birdType || 'quail',
         initialEggs,
@@ -38,10 +38,19 @@ export function buildIncubatorCrmPayload(batch) {
         insertDate: insertDateObj.getTime(),
         hatchDate: hatchDateObj.getTime(),
         slaughterAge: slAge + bufferDays,
-        isOpen: true,
-        isVisible: true
+        fromFarm: true,
+        farmSyncedAt: Date.now()
     };
+
+    if (isNewForCrm) {
+        payload.isOpen = false;
+        payload.isVisible = false;
+        payload.pendingApproval = true;
+    }
+
+    return payload;
 }
+
 
 export function renderIncubatorGrid() {
     const grid = document.getElementById('incubatorGrid');
@@ -262,10 +271,11 @@ export async function loadIncubatorShelf() {
             await set(ref(db, `batches/${batchIdToUse}`), batchObj);
 
             try {
-                await syncBatchToCRM(batchIdToUse, buildIncubatorCrmPayload(batchObj), true);
+                await syncBatchToCRM(batchIdToUse, buildIncubatorCrmPayload(batchObj, true), true);
             } catch (err) {
                 console.warn('CRM incubator create skipped:', err);
             }
+
             showToast(`تم إدخال الدفعة على ${targetCount} أرفف وترحيلها للـ CRM (عمر يوم) 🚀`);
         }
 
@@ -386,7 +396,7 @@ export async function saveNewBatch() {
 
         let crmNote = ' وترحيلها للـ CRM (عمر يوم)';
         try {
-            await syncBatchToCRM(newRef.key, buildIncubatorCrmPayload(batchObj), true);
+            await syncBatchToCRM(newRef.key, buildIncubatorCrmPayload(batchObj, true), true);
         } catch (err) {
             console.warn('CRM new batch sync skipped:', err);
             crmNote = ' (تعذر الترحيل للـ CRM حالياً)';
