@@ -1,4 +1,3 @@
-
 // www/js/modules/rearing.js
 // إدارة الفقس، عنابر التربية، اليوميات (علف/نافق)، دليل العامل الذكي، والمزامنة الكاملة مع الـ CRM
 
@@ -135,7 +134,6 @@ export async function moveToRearing() {
                 farmSyncedAt: Date.now()
             }, false);
         } catch (err) {
-
             console.error('CRM Sync Error:', err);
             crmMsg = ' (تعذر الترحيل للـ CRM - يمكنك المزامنة لاحقاً)';
         }
@@ -282,6 +280,10 @@ export async function syncLegacyBatchesToCRM() {
 
                 await syncBatchToCRM(id, rearPayload, !existsInCRM);
             }
+
+            if (existsInCRM) updatedCount++;
+            else createdCount++;
+        }
 
         showToast(`✅ تمت المزامنة الكاملة: ${createdCount} جديدة + ${updatedCount} محدثة بأمان!`);
     }, 'جاري المزامنة الشاملة مع الـ CRM...');
