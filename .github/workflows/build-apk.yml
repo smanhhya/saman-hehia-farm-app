@@ -50,10 +50,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -83,50 +83,13 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Lock Fixed Keystore & Increment VersionCode in build.gradle
+      - name: Lock Fixed Keystore & Increment VersionCode
         env:
           BUILD_NUM: ${{ github.run_number }}
+          KS_B64: "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"
         run: |
-          cat << 'KEYSTORE_EOF' | tr -d ' \n\r' | base64 -d > android/app/saman-fixed.keystore
-          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
-          KEYSTORE_EOF
+          printf "%s" "$KS_B64" | base64 -d > android/app/saman-fixed.keystore
+          keytool -list -keystore android/app/saman-fixed.keystore -storepass android
 
           node -e '
             const fs = require("fs");
@@ -137,22 +100,25 @@ jobs:
             const vName = "2.2." + n;
             g = g.replace(/versionCode\s+\d+/, "versionCode " + vCode);
             g = g.replace(/versionName\s+"[^"]+"/, "versionName \"" + vName + "\"");
-            const signBlock = [
-              "    signingConfigs {",
-              "        debug {",
-              "            storeFile file(\"saman-fixed.keystore\")",
-              "            storePassword \"android\"",
-              "            keyAlias \"androiddebugkey\"",
-              "            keyPassword \"android\"",
-              "        }",
-              "    }",
-              "    buildTypes {",
-              "        debug {",
-              "            signingConfig signingConfigs.debug",
-              "        }"
-            ].join("\n");
-            g = g.replace("    buildTypes {", signBlock);
+            if (!g.includes("saman-fixed.keystore")) {
+              const signBlock = [
+                "    signingConfigs {",
+                "        debug {",
+                "            storeFile file(\"saman-fixed.keystore\")",
+                "            storePassword \"android\"",
+                "            keyAlias \"androiddebugkey\"",
+                "            keyPassword \"android\"",
+                "        }",
+                "    }",
+                "    buildTypes {",
+                "        debug {",
+                "            signingConfig signingConfigs.debug",
+                "        }"
+              ].join("\n");
+              g = g.replace(/^\s*buildTypes\s*\{/m, signBlock);
+            }
             fs.writeFileSync(p, g, "utf8");
+            console.log("=== PATCHED build.gradle ===\n" + g);
           '
 
       - name: Build Debug APK
@@ -162,14 +128,14 @@ jobs:
           ./gradlew assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk ../saman-hehia-erp.apk
 
-      - name: Publish Latest Release APK (For In-App Update Button)
+      - name: Publish Latest Release APK
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_NUM: ${{ github.run_number }}
         run: |
           TAG="v2.2.${BUILD_NUM}"
-          gh release create "$TAG" saman-hehia-erp.apk --title "سمان ههيا ERP ${TAG}" --notes "تحديث تلقائي بتوقيع ثابت (يتثبت فوق النسخة السابقة بدون مسح)" --latest
+          gh release create "$TAG" saman-hehia-erp.apk --title "سمان ههيا ERP ${TAG}" --notes "تحديث تلقائي بتوقيع ثابت" --latest
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
