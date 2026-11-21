@@ -71,10 +71,9 @@ export async function atomicAdjust(path, delta, options = {}) {
 }
 
 /**
- * ترحيل أو تحديث دفعة في الـ CRM بأمان تام لجميع المراحل (عمر يوم / تفريخ -> تربية -> ذبح)
- * - يحافظ دائماً على initialEggs و hatchedChicks و hatchRate
- * - عند الإنشاء لأول مرة فقط يُهيئ stock و booked ككائنات فارغة
- * - عند التحديث (مثل الانتقال للتربية أو تسجيل نافق) لا يلمس حجوزات العملاء (booked) نهائياً
+ * ترحيل أو تحديث دفعة في الـ CRM بأمان تام مع دعم كامل لكل المزايا:
+ * - يمرر تلقائياً batchType و pendingApproval و fromFarm و farmSyncedAt و initialEggs و hatchedChicks و hatchRate
+ * - يحمي حجوزات العملاء (booked) والمخزون (stock) من المسح عند أي تحديث
  */
 export async function syncBatchToCRM(batchId, data, isNew = false) {
     const batchDocRef = doc(crmDb, "inventory", "batches");
@@ -91,30 +90,31 @@ export async function syncBatchToCRM(batchId, data, isNew = false) {
         }
     }
 
+    const intFields = new Set([
+        'initialEggs', 'hatchedChicks', 'expectedChicks',
+        'aliveBirds', 'unfertilized', 'deadInShell', 'expectedPairs'
+    ]);
+    const protectedFields = new Set(['stock', 'booked']);
+
     const payload = {};
-    if (data.name !== undefined) payload.name = data.name;
-    if (data.stage !== undefined) payload.stage = data.stage;
-    if (data.birdType !== undefined) payload.birdType = data.birdType;
-    if (data.initialEggs !== undefined) payload.initialEggs = Math.max(0, Math.floor(Number(data.initialEggs) || 0));
-    if (data.hatchedChicks !== undefined) payload.hatchedChicks = Math.max(0, Math.floor(Number(data.hatchedChicks) || 0));
-    if (data.hatchRate !== undefined) payload.hatchRate = Number(data.hatchRate) || 0;
-    if (data.expectedChicks !== undefined) payload.expectedChicks = Math.max(0, Math.floor(Number(data.expectedChicks) || 0));
-    if (data.aliveBirds !== undefined) payload.aliveBirds = Math.max(0, Math.floor(Number(data.aliveBirds) || 0));
-    if (data.unfertilized !== undefined) payload.unfertilized = Math.max(0, Math.floor(Number(data.unfertilized) || 0));
-    if (data.deadInShell !== undefined) payload.deadInShell = Math.max(0, Math.floor(Number(data.deadInShell) || 0));
-    if (data.expectedPairs !== undefined) payload.expectedPairs = Math.max(0, Math.floor(Number(data.expectedPairs) || 0));
-    if (data.insertDate !== undefined) payload.insertDate = data.insertDate;
-    if (data.hatchDate !== undefined) payload.hatchDate = data.hatchDate;
-    if (data.slaughterAge !== undefined) payload.slaughterAge = data.slaughterAge;
-    if (data.isOpen !== undefined) payload.isOpen = data.isOpen;
-    if (data.isVisible !== undefined) payload.isVisible = data.isVisible;
+    Object.entries(data || {}).forEach(([k, v]) => {
+        if (v === undefined || protectedFields.has(k)) return;
+        if (intFields.has(k)) {
+            payload[k] = Math.max(0, Math.floor(Number(v) || 0));
+        } else if (k === 'hatchRate') {
+            payload[k] = Number(v) || 0;
+        } else {
+            payload[k] = v;
+        }
+    });
     payload.updatedAt = Date.now();
 
     if (shouldInitializeNew) {
         await setDoc(batchDocRef, {
             [batchId]: {
-                isOpen: true,
-                isVisible: true,
+                isOpen: false,
+                isVisible: false,
+                pendingApproval: true,
                 initialEggs: 0,
                 hatchedChicks: 0,
                 hatchRate: 0,
