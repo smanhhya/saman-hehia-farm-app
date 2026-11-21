@@ -1,4 +1,4 @@
-// www/js/app.js — نسخة مُصلّحة تعمل مباشرة على ملفاتك الموجودة
+// www/js/app.js — النسخة الكاملة المحدثة (الأمهات Pro + التحديث التلقائي + الربط المزدوج مع CRM)
 
 async function loadModuleSafe(path) {
     try {
@@ -58,6 +58,10 @@ async function bootApp() {
         } = uiMod;
         const { escapeHtml } = valMod;
 
+        // تهيئة حقل تعدد القطعان للأمهات Pro
+        if (!state.breedersFlocks) state.breedersFlocks = {};
+
+        // ================= 1. رندر الدفعات ولوحة التنبيهات =================
         function renderBatchesAndAlerts() {
             const ui = {
                 inc: document.getElementById('incubatorList'),
@@ -312,9 +316,99 @@ async function bootApp() {
             reports.populateReportSelector();
         }
 
+        // ================= 2. محرك التحديث التلقائي الذكي (OTA + GitHub Releases) =================
+        let pendingUpdateInfo = null;
+
+        function showUpdateBanner(subtitle) {
+            const b = document.getElementById('updateAvailableBanner');
+            const s = document.getElementById('updateBannerSub');
+            if (s) s.textContent = subtitle;
+            if (b) b.style.display = 'flex';
+        }
+
+        async function forceReloadApp() {
+            showToast('جاري مسح الكاش وتحديث التطبيق... 🔄');
+            try {
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map((k) => caches.delete(k)));
+                }
+                if ('serviceWorker' in navigator) {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map((r) => r.update().catch(() => {})));
+                }
+            } catch (e) {
+                console.warn('Cache clear warning:', e);
+            }
+            setTimeout(() => window.location.reload(), 600);
+        }
+
+        async function checkForAppUpdate(manual = false) {
+            const topBtn = document.getElementById('topUpdateBtn');
+            const icon = topBtn?.querySelector('i');
+            if (manual && icon) icon.classList.add('fa-spin');
+
+            try {
+                const localRes = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+                const localInfo = localRes && localRes.ok ? await localRes.json() : { version: '2.2.0', build: 0, repo: '' };
+                const badgeEl = document.getElementById('appVersionBadge');
+                if (badgeEl) badgeEl.textContent = `v${localInfo.version} (بناء #${localInfo.build || 0})`;
+
+                // 1) لو التطبيق متصل عبر GitHub Pages -> تحديث فوري OTA بدون تحميل APK
+                const savedBuild = Number(localStorage.getItem('saman_erp_build') || 0);
+                if (window.location.hostname.endsWith('github.io') && Number(localInfo.build) > 0) {
+                    if (savedBuild > 0 && Number(localInfo.build) > savedBuild) {
+                        pendingUpdateInfo = { mode: 'ota', ...localInfo };
+                        showUpdateBanner(`الإصدار v${localInfo.version} جاهز — تحديث فوري بدون تحميل APK!`);
+                        if (manual) applyAppUpdate();
+                        return;
+                    }
+                    localStorage.setItem('saman_erp_build', String(localInfo.build));
+                }
+
+                // 2) فحص أحدث إصدار من GitHub Releases (للـ APK المثبت)
+                if (localInfo.repo) {
+                    const relRes = await fetch(`https://api.github.com/repos/${localInfo.repo}/releases/latest`, { cache: 'no-store' });
+                    if (relRes.ok) {
+                        const rel = await relRes.json();
+                        const latestTag = (rel.tag_name || '').replace(/^v/, '');
+                        const latestBuild = Number((latestTag.split('.')[2]) || 0);
+                        const apkAsset = (rel.assets || []).find((a) => (a.name || '').endsWith('.apk'));
+                        if (latestBuild > Number(localInfo.build || 0) && apkAsset?.browser_download_url) {
+                            pendingUpdateInfo = { mode: 'apk', version: latestTag, apkUrl: apkAsset.browser_download_url };
+                            showUpdateBanner(`يتوفر الإصدار الجديد v${latestTag} (تحديث مباشر فوق التطبيق بدون مسح)`);
+                            if (manual) showToast(`يتوفر تحديث v${latestTag}! اضغط "تحديث الآن" بالأعلى 🚀`);
+                            return;
+                        }
+                    }
+                }
+
+                if (manual) {
+                    showToast(`أنت تستخدم أحدث إصدار حالياً (v${localInfo.version}) ✅`);
+                }
+            } catch (err) {
+                if (manual) showToast('تأكد من الاتصال بالإنترنت لفحص التحديثات', true);
+            } finally {
+                if (icon) icon.classList.remove('fa-spin');
+            }
+        }
+
+        function applyAppUpdate() {
+            if (!pendingUpdateInfo) return forceReloadApp();
+            if (pendingUpdateInfo.mode === 'ota') {
+                localStorage.setItem('saman_erp_build', String(pendingUpdateInfo.build));
+                return forceReloadApp();
+            }
+            if (pendingUpdateInfo.apkUrl) {
+                showToast('جاري تحميل التحديث — اضغط تثبيت/تحديث فور انتهاء التحميل 📥');
+                window.open(pendingUpdateInfo.apkUrl, '_blank');
+            }
+        }
+
+        // ================= 3. لوحة الأوامر السريعة (Ctrl+K) =================
         const sysCmds = [
             { title: 'لوحة القيادة الرئيسية', icon: 'fas fa-chart-pie', action: () => switchPage('dashboard') },
-            { title: 'إدارة قطيع الأمهات والمفرخ', icon: 'fas fa-venus-mars', action: () => switchPage('breeders') },
+            { title: 'إدارة قطيع الأمهات (Pro)', icon: 'fas fa-venus-mars', action: () => switchPage('breeders') },
             { title: 'إدارة التفريخ والمفقس', icon: 'fas fa-temperature-half', action: () => switchPage('incubator') },
             { title: 'عنابر التربية والذبح', icon: 'fas fa-kiwi-bird', action: () => switchPage('rearing') },
             { title: 'المخزون والفريزر (FIFO)', icon: 'fas fa-snowflake', action: () => switchPage('freezer') },
@@ -323,11 +417,13 @@ async function bootApp() {
             { title: 'جرد المعدات والأصول', icon: 'fas fa-boxes', action: () => switchPage('inventory') },
             { title: 'مركز التحكم والإعدادات', icon: 'fas fa-sliders-h', action: () => switchPage('settingsPage') },
             { title: '➕ إضافة دفعة تفريخ جديدة', icon: 'fas fa-plus-circle', action: () => incubator.openNewBatchModal() },
+            { title: '🕊️ إضافة قطيع أمهات جديد', icon: 'fas fa-dove', action: () => breeders.openFlockModal() },
             { title: '📝 تسجيل علف/نافق يومي (تربية)', icon: 'fas fa-clipboard-list', action: () => rearing.openDailyRearingModal() },
             { title: '🥚 فرز بيض الأمهات اليومي', icon: 'fas fa-egg', action: () => breeders.openTriageModal() },
             { title: '🌾 توريد علف جديد للمخزن', icon: 'fas fa-truck-loading', action: () => finance.openBuyFeedModal() },
             { title: '🛒 فاتورة بيع سريع من الفريزر', icon: 'fas fa-shopping-cart', action: () => freezer.openSaleModal() },
-            { title: '🔄 مزامنة دفعات التربية مع الـ CRM', icon: 'fas fa-rotate', action: () => rearing.syncLegacyBatchesToCRM() },
+            { title: '🔄 مزامنة الدفعات مع الـ CRM', icon: 'fas fa-rotate', action: () => rearing.syncLegacyBatchesToCRM() },
+            { title: '🚀 فحص وتحديث التطبيق الآن', icon: 'fas fa-arrows-rotate', action: () => checkForAppUpdate(true) },
             { title: '📥 تحميل نسخة احتياطية JSON', icon: 'fas fa-download', action: () => settings.exportFullBackup() }
         ];
 
@@ -363,14 +459,33 @@ async function bootApp() {
             });
         }
 
+        // ================= 4. ربط كل الدوال بالواجهة (window) =================
         Object.assign(window, {
             switchPage, openModal, closeModal, showToast, toggleFab, toggleAppTheme,
             setThemeMode: (mode) => applyTheme(mode, true),
             setPrimaryColor: (hex) => applyAccentColor(hex, true),
             openCommandPalette,
+            checkForAppUpdate,
+            applyAppUpdate,
+            forceReloadApp,
 
+            // Breeders Pro
+            openFlockModal: breeders.openFlockModal,
             openFlockSetupModal: breeders.openFlockSetupModal,
             updateFlockLedger: breeders.updateFlockLedger,
+            deleteFlock: breeders.deleteFlock,
+            openLiquidateFlockModal: breeders.openLiquidateFlockModal,
+            confirmLiquidateFlock: breeders.confirmLiquidateFlock,
+            openPromoteRearingModal: breeders.openPromoteRearingModal,
+            confirmPromoteToBreeder: breeders.confirmPromoteToBreeder,
+            openEggControlModal: breeders.openEggControlModal,
+            toggleEggControlFields: breeders.toggleEggControlFields,
+            confirmEggControlAction: breeders.confirmEggControlAction,
+            switchBreedersLogTab: breeders.switchBreedersLogTab,
+            deleteTriageLog: breeders.deleteTriageLog,
+            deleteBreederHistoryLog: breeders.deleteBreederHistoryLog,
+            openBreederExpenseModal: breeders.openBreederExpenseModal,
+            saveBreederExpense: breeders.saveBreederExpense,
             openBreederDailyModal: breeders.openBreederDailyModal,
             saveBreederDailyLog: breeders.saveBreederDailyLog,
             openTriageModal: breeders.openTriageModal,
@@ -381,6 +496,7 @@ async function bootApp() {
             confirmSellTableEggs: breeders.confirmSellTableEggs,
             openBreederGuide: breeders.openBreederGuide,
 
+            // Incubator
             openShelfSetup: incubator.openShelfSetup,
             toggleShelfInputs: incubator.toggleShelfInputs,
             calcShelfDist: incubator.calcShelfDist,
@@ -400,6 +516,7 @@ async function bootApp() {
             moveBatchUp: (id) => incubator.moveBatchOrder(id, 'up'),
             moveBatchDown: (id) => incubator.moveBatchOrder(id, 'down'),
 
+            // Rearing
             promptHatch: rearing.promptHatch,
             syncHatchSlaughterDate: rearing.syncHatchSlaughterDate,
             moveToRearing: rearing.moveToRearing,
@@ -408,6 +525,7 @@ async function bootApp() {
             syncLegacyBatchesToCRM: rearing.syncLegacyBatchesToCRM,
             openDailyGuide: rearing.openDailyGuide,
 
+            // Freezer
             openEditFreezerItem: freezer.openEditFreezerItem,
             saveEditFreezerItem: freezer.saveEditFreezerItem,
             addCategoryFromMaster: freezer.addCategoryFromMaster,
@@ -422,6 +540,7 @@ async function bootApp() {
             toggleLogDeletion: freezer.toggleLogDeletion,
             deleteFreezerLog: freezer.deleteFreezerLog,
 
+            // Finance
             editFeedStock: finance.editFeedStock,
             editCashBox: finance.editCashBox,
             openBuyFeedModal: finance.openBuyFeedModal,
@@ -436,15 +555,18 @@ async function bootApp() {
             confirmArchiveBatch: finance.confirmArchiveBatch,
             closeMonth: finance.closeMonth,
 
+            // Reports
             generateBatchReport: reports.generateBatchReport,
             openBatchReportFor: reports.openBatchReportFor,
 
+            // Inventory
             openAddInventoryModal: inventory.openAddInventoryModal,
             openEditInventoryModal: inventory.openEditInventoryModal,
             addOrUpdateInventoryItem: inventory.addOrUpdateInventoryItem,
             updateInventoryItemQty: inventory.updateInventoryItemQty,
             deleteInventoryItem: inventory.deleteInventoryItem,
 
+            // Settings
             switchSettingsTab: settings.switchSettingsTab,
             filterSettingsSearch: settings.filterSettingsSearch,
             calcIncubatorTotalCap: settings.calcIncubatorTotalCap,
@@ -455,6 +577,7 @@ async function bootApp() {
             resetSystem: settings.resetSystem
         });
 
+        // ================= 5. تشغيل الواجهة والاتصال اللحظي بـ Firebase =================
         initThemeSystem();
         initGlobalInteractions(openCommandPalette);
         document.getElementById('cmdInput')?.addEventListener('input', (e) => renderCmdResults(e.target.value));
@@ -465,6 +588,7 @@ async function bootApp() {
             state.settings = snap.exists() ? { ...DEFAULT_SETTINGS, ...snap.val() } : { ...DEFAULT_SETTINGS };
             settings.hydrateSettingsUI();
             incubator.renderIncubatorGrid();
+            breeders.renderBreeders();
             finance.renderFeedStockCard();
             renderBatchesAndAlerts();
         });
@@ -484,6 +608,7 @@ async function bootApp() {
         onValue(ref(db, 'incubatorGrid'), (snap) => {
             state.incubatorGrid = snap.exists() ? snap.val() : {};
             incubator.renderIncubatorGrid();
+            breeders.renderBreeders();
         });
 
         onValue(ref(db, 'inventory/feedStock'), (snap) => {
@@ -537,6 +662,11 @@ async function bootApp() {
             renderBatchesAndAlerts();
         });
 
+        onValue(ref(db, 'inventory/breedersFlocks'), (snap) => {
+            state.breedersFlocks = snap.exists() ? snap.val() : {};
+            breeders.renderBreeders();
+        });
+
         onValue(ref(db, 'inventory/readyEggsStock'), (snap) => {
             state.readyEggsStock = snap.exists() ? parseInt(snap.val(), 10) || 0 : 0;
             breeders.renderBreeders();
@@ -549,6 +679,11 @@ async function bootApp() {
 
         onValue(ref(db, 'breedersLogs'), (snap) => {
             state.breedersLogs = snap.exists() ? snap.val() : {};
+            breeders.renderBreeders();
+        });
+
+        onValue(ref(db, 'breedersHistoryLogs'), (snap) => {
+            state.breedersHistoryLogs = snap.exists() ? snap.val() : {};
             breeders.renderBreeders();
         });
 
@@ -567,11 +702,13 @@ async function bootApp() {
         onValue(ref(db, 'ledger'), (snap) => {
             state.ledger = snap.exists() ? snap.val() : {};
             finance.renderTransactionsList();
+            breeders.renderBreeders();
             reports.generateBatchReport();
         });
 
         onValue(ref(db, 'archivedLedger'), (snap) => {
             state.archivedLedger = snap.exists() ? snap.val() : {};
+            breeders.renderBreeders();
             reports.generateBatchReport();
         });
 
@@ -583,6 +720,9 @@ async function bootApp() {
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             navigator.serviceWorker.register('./sw.js').then((reg) => reg.update().catch(() => {})).catch(() => {});
         }
+
+        // فحص تلقائي للتحديثات بعد 3 ثوانٍ من فتح التطبيق
+        setTimeout(() => checkForAppUpdate(false), 3000);
     } catch (err) {
         console.error('[BootError]', err);
         showBootError(err?.message || String(err));
