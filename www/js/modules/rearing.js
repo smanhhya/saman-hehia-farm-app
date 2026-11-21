@@ -1,4 +1,3 @@
-
 // www/js/modules/rearing.js
 // إدارة الفقس، عنابر التربية، اليوميات (علف/نافق)، دليل العامل الذكي، والمزامنة الكاملة مع الـ CRM
 
@@ -112,8 +111,10 @@ export async function moveToRearing() {
 
         let crmMsg = ` وترحيل (${healthy}/${initialEggs} | فقس ${hatchRate}%) للـ CRM`;
         try {
+            const targetTrack = (b.birdType === 'chicken' || b.birdType === 'turkey') ? 'weight' : 'quail';
             await syncBatchToCRM(id, {
                 name: finalName,
+                batchType: targetTrack,
                 stage: 'rearing',
                 birdType: b.birdType || 'quail',
                 initialEggs,
@@ -126,10 +127,14 @@ export async function moveToRearing() {
                 expectedPairs,
                 hatchDate: hatchDateObj.getTime(),
                 slaughterAge: slAge + bufferDays,
-                isOpen: true,
-                isVisible: true
+                isOpen: false,
+                isVisible: false,
+                pendingApproval: true,
+                fromFarm: true,
+                farmSyncedAt: Date.now()
             }, false);
         } catch (err) {
+
             console.error('CRM Sync Error:', err);
             crmMsg = ' (تعذر الترحيل للـ CRM - يمكنك المزامنة لاحقاً)';
         }
@@ -238,7 +243,7 @@ export async function syncLegacyBatchesToCRM() {
             const existsInCRM = Boolean(existingCRM[id]);
 
             if (b.status === 'incubator' || b.status === 'hatcher') {
-                await syncBatchToCRM(id, buildIncubatorCrmPayload(b), !existsInCRM);
+                await syncBatchToCRM(id, buildIncubatorCrmPayload(b, !existsInCRM), !existsInCRM);
             } else {
                 const initialEggs = Number(b.initialEggs) || 0;
                 const hatched = Number(b.hatchedChicks) || 0;
@@ -247,9 +252,11 @@ export async function syncLegacyBatchesToCRM() {
                 const hatchDateObj = b.hatchDate ? new Date(b.hatchDate) : new Date();
                 const slAge = b.slaughterAge || getBirdStandard(b.birdType || 'quail').slaughter;
                 const hatchRate = b.hatchRate ?? (initialEggs > 0 ? Number(((hatched / initialEggs) * 100).toFixed(1)) : 0);
+                const targetTrack = (b.birdType === 'chicken' || b.birdType === 'turkey') ? 'weight' : 'quail';
 
-                await syncBatchToCRM(id, {
+                const rearPayload = {
                     name: b.name,
+                    batchType: targetTrack,
                     stage: 'rearing',
                     birdType: b.birdType || 'quail',
                     initialEggs,
@@ -262,14 +269,18 @@ export async function syncLegacyBatchesToCRM() {
                     expectedPairs,
                     hatchDate: hatchDateObj.getTime(),
                     slaughterAge: slAge + bufferDays,
-                    isOpen: true,
-                    isVisible: true
-                }, !existsInCRM);
-            }
+                    fromFarm: true,
+                    farmSyncedAt: Date.now()
+                };
 
-            if (existsInCRM) updatedCount++;
-            else createdCount++;
-        }
+                if (!existsInCRM) {
+                    rearPayload.isOpen = false;
+                    rearPayload.isVisible = false;
+                    rearPayload.pendingApproval = true;
+                }
+
+                await syncBatchToCRM(id, rearPayload, !existsInCRM);
+            }
 
         showToast(`✅ تمت المزامنة الكاملة: ${createdCount} جديدة + ${updatedCount} محدثة بأمان!`);
     }, 'جاري المزامنة الشاملة مع الـ CRM...');
