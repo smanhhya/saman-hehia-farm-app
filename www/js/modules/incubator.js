@@ -1,4 +1,5 @@
 // www/js/modules/incubator.js
+
 // إدارة المفرخ وخريطة الأرفف التفاعلية + الربط الثنائي بالدفعات + الترحيل الفوري للـ CRM (عمر يوم)
 
 import { db, ref, set, push, update, remove, atomicAdjust, syncBatchToCRM } from '../config/firebase.js';
