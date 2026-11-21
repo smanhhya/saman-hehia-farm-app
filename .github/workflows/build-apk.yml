@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -23,6 +23,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Stamp Version Info
+        run: |
+          BUILD_NUM="${{ github.run_number }}"
+          REPO="${{ github.repository }}"
+          echo "{\"version\":\"2.2.${BUILD_NUM}\",\"build\":${BUILD_NUM},\"repo\":\"${REPO}\",\"apkUrl\":\"https://github.com/${REPO}/releases/latest/download/saman-hehia-erp.apk\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > www/version.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -55,10 +61,33 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Fixed Signing Key
+      - name: Stamp Version Info in APK
         run: |
-          mkdir -p "$HOME/.android"
-          cat << 'KEYSTORE_EOF' | tr -d ' \n\r' | base64 -d > "$HOME/.android/debug.keystore"
+          BUILD_NUM="${{ github.run_number }}"
+          REPO="${{ github.repository }}"
+          echo "{\"version\":\"2.2.${BUILD_NUM}\",\"build\":${BUILD_NUM},\"repo\":\"${REPO}\",\"apkUrl\":\"https://github.com/${REPO}/releases/latest/download/saman-hehia-erp.apk\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > www/version.json
+
+      - name: Wire Auto-Update URL
+        env:
+          LIVE_URL: ${{ needs.deploy-live.outputs.page_url }}
+        run: |
+          if [ -n "$LIVE_URL" ]; then
+            node -e 'const fs=require("fs"),c=JSON.parse(fs.readFileSync("capacitor.config.json","utf8"));c.server=c.server||{};c.server.url=process.env.LIVE_URL;c.server.allowNavigation=[...new Set([...(c.server.allowNavigation||[]),"*.github.io","github.com","api.github.com"])];fs.writeFileSync("capacitor.config.json",JSON.stringify(c,null,2));'
+          fi
+
+      - name: Install Dependencies & Sync Android
+        run: |
+          npm install
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Lock Fixed Keystore & Increment VersionCode in build.gradle
+        env:
+          BUILD_NUM: ${{ github.run_number }}
+        run: |
+          cat << 'KEYSTORE_EOF' | tr -d ' \n\r' | base64 -d > android/app/saman-fixed.keystore
           /u3+7QAAAAIAAAABAAAAAQAPYW5kcm9pZGRlYnVna2V5AAABofsz874AAAUAMIIE/DAOBgorBgEE
           ASoCEQEBBQAEggToUoUzfcmC254zQZteI4QW6yAbfjTKueQEJ100Ma74HsfjcnY3S7FEcB6EZ7hH
           0P/+0szC2/4DEuCrQ6sDOf5BtHkl6BLV+nsXhrbIfUCU3qksOngjFcRlVtxJ1OpaV3W4tNkgrO9w
@@ -98,46 +127,53 @@ jobs:
           RLn31g3dzrtzqkclHr2jhXrh6loPLNFNVRvUkGVYZgcrNG8bqc9CoSf5LnR5hJ9mVGfInx0r7YP4
           lXVO4enz/ngQ0IeCpUY9VMvp7yPgjHsTpvK0Fn0h
           KEYSTORE_EOF
-          if [ -n "$ANDROID_USER_HOME" ]; then
-            mkdir -p "$ANDROID_USER_HOME"
-            cp "$HOME/.android/debug.keystore" "$ANDROID_USER_HOME/debug.keystore"
-          fi
-          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android
 
-      - name: Wire Auto-Update URL
-        env:
-          LIVE_URL: ${{ needs.deploy-live.outputs.page_url }}
-        run: |
-          if [ -n "$LIVE_URL" ]; then
-            node -e 'const fs=require("fs"),c=JSON.parse(fs.readFileSync("capacitor.config.json","utf8"));c.server=c.server||{};c.server.url=process.env.LIVE_URL;c.server.allowNavigation=[...new Set([...(c.server.allowNavigation||[]),"*.github.io"])];fs.writeFileSync("capacitor.config.json",JSON.stringify(c,null,2));'
-          fi
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Sync Android
-        run: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-          npx cap sync android
-
-      - name: Auto-Increment VersionCode
-        run: |
-          BUILD_NUM="${{ github.run_number }}"
-          sed -i "s/versionCode 1/versionCode ${BUILD_NUM}/g" android/app/build.gradle
-          sed -i "s/versionName \"1.0\"/versionName \"2.1.${BUILD_NUM}\"/g" android/app/build.gradle
-          grep -E "versionCode|versionName" android/app/build.gradle
+          node -e '
+            const fs = require("fs");
+            const p = "android/app/build.gradle";
+            let g = fs.readFileSync(p, "utf8");
+            const n = parseInt(process.env.BUILD_NUM || "1", 10);
+            const vCode = 100 + n;
+            const vName = "2.2." + n;
+            g = g.replace(/versionCode\s+\d+/, "versionCode " + vCode);
+            g = g.replace(/versionName\s+"[^"]+"/, "versionName \"" + vName + "\"");
+            const signBlock = [
+              "    signingConfigs {",
+              "        debug {",
+              "            storeFile file(\"saman-fixed.keystore\")",
+              "            storePassword \"android\"",
+              "            keyAlias \"androiddebugkey\"",
+              "            keyPassword \"android\"",
+              "        }",
+              "    }",
+              "    buildTypes {",
+              "        debug {",
+              "            signingConfig signingConfigs.debug",
+              "        }"
+            ].join("\n");
+            g = g.replace("    buildTypes {", signBlock);
+            fs.writeFileSync(p, g, "utf8");
+          '
 
       - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../saman-hehia-erp.apk
 
-      - name: Upload APK
+      - name: Publish Latest Release APK (For In-App Update Button)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_NUM: ${{ github.run_number }}
+        run: |
+          TAG="v2.2.${BUILD_NUM}"
+          gh release create "$TAG" saman-hehia-erp.apk --title "سمان ههيا ERP ${TAG}" --notes "تحديث تلقائي بتوقيع ثابت (يتثبت فوق النسخة السابقة بدون مسح)" --latest
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Saman-Hehia-Farm-ERP-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: saman-hehia-erp.apk
           retention-days: 30
